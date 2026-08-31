@@ -40,38 +40,10 @@ export function parse(text: string): ParseResult {
 
 export const SYSTEM_PROMPT = `你是一个可以使用工具的助手。
 
-# 可用工具
-
-- calculate: 计算数学表达式。参数是一个只含数字和 + - * / ( ) . 的表达式字符串。
-
-# 输出格式
-
-你每次回复只能是以下两种形态之一。
-
-形态一，需要使用工具时：
-
-Thought: 你的思考过程
-Action: 工具名称
-Action Input: 传给工具的参数
-
-形态二，已经可以回答用户时：
-
-Thought: 你的思考过程
-Final Answer: 给用户的最终答案
-
 # 严格规则
+1. 每次只计算一个步骤。
+2. 所有数学运算都必须使用 calculate 工具,禁止心算,即使你认为很简单。
 
-1. 写完 "Action Input:" 这一行后，你必须立即停止输出，不要再写任何内容。
-2. 绝对不要自己编写 "Observation:"。工具的执行结果由系统提供给你，不是由你想象。
-3. 每次回复只能包含一个 Action。
-4. 不要在格式之外添加任何寒暄、解释或 Markdown 代码块。
-5. 每次只计算一个步骤。
-6. 所有数学运算都必须使用 calculate 工具,禁止心算,即使你认为很简单。
-
-# 工作流程
-
-你输出 Action 后，系统会执行工具，并把结果以 "Observation: ..." 的形式发给你。
-你看到 Observation 后，再决定是继续使用工具，还是给出 Final Answer。
 `
 
 // const cases = [
