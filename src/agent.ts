@@ -3,9 +3,16 @@ import { client, MODEL } from './llm.js'
 import { getToolSchemas, prepareCall, executeCall } from './tools/index.js'
 import { requestApproval } from './approval.js'
 import { ask, closeUI } from './ui.js'
+import { detectRepeatedCall, trimHistory, truncateToolResult } from './context.js'
+import type { ToolCallLog } from './context.js'
 
 /** 单次用户输入内最多问模型几轮。有了文件操作后任务链更长，从 5 提到 10 */
 const MAX_ITERATIONS = 10
+
+/** 连续这么多次调用同一工具、参数逐字相同，就看门狗喊停 */
+const REPEAT_THRESHOLD = 3
+/** 看门狗喊了这么多次模型仍不改，强制终止本轮 */
+const MAX_LOOP_HITS = 2
 
 const SYSTEM_PROMPT = [
   '你是一个运行在用户本机命令行里的助手，可以读写文件、执行 shell 命令。',
@@ -56,21 +63,35 @@ async function handleCall(name: string, rawArgs: string): Promise<string> {
 
   const observation = await executeCall(tool, args)
 
-  const firstLine = observation.split('\n')[0] ?? ''
-  const more = observation.includes('\n') ? ' …' : ''
+  const bounded = truncateToolResult(observation)
+  const firstLine = bounded.split('\n')[0] ?? ''
+  const more = bounded.includes('\n') ? ' …' : ''
   console.log(`  → ${tool.name} ⇒ ${firstLine}${more}`)
 
-  return observation
+  return bounded
 }
 
 /** 跑完一次用户输入：反复问模型 → 执行工具 → 回填，直到模型不再要工具 */
 async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
+  // 本轮内累计的工具调用记录。声明在 for 外面 —— 真正的循环是
+  // "模型回复 → 工具 → 再回复 → 再工具"跨多次回复的，放循环里就永远记不到。
+  const recentCalls: ToolCallLog[] = []
+  let loopHits = 0
+
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.chat.completions.create({
       model: MODEL,
       messages,
       tools: getToolSchemas(),
     })
+
+    const usage = response.usage
+    if (usage) {
+      console.log(
+        `  [ctx] 本轮 prompt=${usage.prompt_tokens} completion=${usage.completion_tokens}` +
+          ` total=${usage.total_tokens}`
+      )
+    }
 
     const message = response.choices[0]?.message
     if (!message) throw new Error('模型没有返回 message')
@@ -86,12 +107,34 @@ async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
     if (message.content) console.log(`\nAgent: ${message.content}`)
 
     for (const call of toolCalls) {
+      const isFunction = call.type === 'function'
+
+      if (isFunction) {
+        recentCalls.push({
+          name: call.function.name,
+          argsKey: call.function.arguments,
+        })
+
+        // 看门狗先说话：完全相同参数的重复调用 = 死循环。
+        // 命中就不执行、不回填真实结果，而是回填一段提示让模型掉头。
+        const guard = detectRepeatedCall(recentCalls, REPEAT_THRESHOLD)
+        if (guard) {
+          loopHits++
+          console.log(`  ⚠ ${call.function.name} 触发循环守卫(${loopHits}/${MAX_LOOP_HITS})`)
+          messages.push({ role: 'tool', tool_call_id: call.id, content: guard })
+          if (loopHits >= MAX_LOOP_HITS) {
+            console.log(`\n[中止] 循环守卫已触发 ${MAX_LOOP_HITS} 次仍不收敛，本轮放弃。`)
+            return
+          }
+          continue
+        }
+      }
+
       // 每个 tool_call 都必须产出一条配对的 tool 消息，一条都不能少。
       // 所以这里不能像以前那样 `if (type !== 'function') continue` —— 那会漏配对，下一轮必 400。
-      const observation =
-        call.type === 'function'
-          ? await handleCall(call.function.name, call.function.arguments)
-          : `错误：不支持的工具调用类型 "${call.type}"。`
+      const observation = isFunction
+        ? await handleCall(call.function.name, call.function.arguments)
+        : `错误：不支持的工具调用类型 "${call.type}"。`
 
       messages.push({ role: 'tool', tool_call_id: call.id, content: observation })
     }
@@ -103,9 +146,9 @@ async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
 async function main(): Promise<void> {
   try {
     // messages 在 while 外面创建 —— 它就是这个 Agent 的全部记忆
-    const messages: ChatCompletionMessageParam[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-    ]
+    let messages: ChatCompletionMessageParam[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+      ]
 
     console.log('mini-agent 已启动。输入 exit 退出。')
     console.log(`工作目录：${process.cwd()}\n`)
@@ -116,6 +159,10 @@ async function main(): Promise<void> {
       if (input === '') continue
       if (input === 'exit' || input === 'quit') break
 
+      // 先裁掉旧轮。必须赶在 push 新输入之前 —— 此刻上一轮必然完整，
+      // 永远不会把 tool_call 配对切成两半。
+      messages = trimHistory(messages)
+ 
       // 记下本轮开始前的长度，失败时用来回滚
       const checkpoint = messages.length
       messages.push({ role: 'user', content: input })
