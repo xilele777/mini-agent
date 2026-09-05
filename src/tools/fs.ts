@@ -31,39 +31,61 @@ const BLOCKED = [
 // ─────────────────────────── read_file ───────────────────────────
 
 const readParams = z.object({
-  path: z
-    .string()
-    .min(1, '路径不能为空')
-    .describe('相对项目根目录的文件路径,例如 "src/agent.ts"'),
+  path: z.string().min(1, '路径不能为空').describe('相对项目根目录的文件路径，例如 "src/agent.ts"'),
+  offset: z.number().int().min(1).default(1)
+    .describe('从第几行开始读（从 1 数起）。默认 1。文件很长需要分段时，用 offset 跳到指定行。'),
+  limit: z.number().int().min(1).max(2000).default(500)
+    .describe('最多读多少行。默认 500。一页没读完时，用 offset 翻页继续。'),
 })
 
 export const readFileTool: Tool<z.infer<typeof readParams>> = {
   name: 'read_file',
   description:
-    '读取项目目录内一个文本文件的完整内容。只能读项目目录以内的文件,读不到 .env、.git、node_modules 和私钥文件。要修改文件时,必须先用本工具读出原内容,不要凭记忆重写。',
+    '读取项目目录内一个文本文件的一段内容（按行分页）。默认读前 500 行。' +
+    '文件很长时一次读不完，必须靠 offset 和 limit 分段翻页，直到看到"[已到文件末尾]"。' +
+    '只能读项目目录以内的文件，读不到 .env、.git、node_modules 和私钥文件。' +
+    '要修改文件时，必须先用本工具读出原内容，不要凭记忆重写。',
   schema: readParams,
 
-  // ↓ 注意这里没有 needsApproval。只读工具不打断用户,
-  //   代价是它必须自己在 execute 里守住边界 —— 少一道人工审查,就得多一道代码检查。
-  execute: async ({ path }) => {
+  execute: async ({ path, offset, limit }) => {
     const abs = resolve(ROOT, path)
 
     if (!insideRoot(abs)) {
-      return `错误:拒绝读取 "${path}"。它解析后指向 ${abs},在项目目录(${ROOT})之外。只能读项目目录以内的文件。`
+      return `错误：拒绝读取 "${path}"。它解析后指向 ${abs}，在项目目录(${ROOT})之外。只能读项目目录以内的文件。`
     }
 
     const hit = BLOCKED.find((b) => b.re.test(abs))
     if (hit) {
-      return `错误:拒绝读取 "${path}" —— ${hit.why}。请换一个文件,不要尝试绕过这条限制。`
+      return `错误：拒绝读取 "${path}" —— ${hit.why}。请换一个文件，不要尝试绕过这条限制。`
     }
 
     try {
-      return await readFile(abs, 'utf8')
+      const all = await readFile(abs, 'utf8')
+      // 按行切开。结尾的换行符会多产出一个空串，先剥掉，否则行号会虚高 1
+      const lines = all.split('\n')
+      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+
+      const total = lines.length
+
+      // offset 超出文件末尾：这一页是空的，明确告诉模型"没有了"，别让它空等
+      if (offset > total) {
+        return `[文件 ${path} 共 ${total} 行，第 ${offset} 行已超出范围，没有更多内容]`
+      }
+
+      const end = Math.min(offset + limit - 1, total)
+      const content = lines.slice(offset - 1, end).join('\n')
+      const done = end >= total
+      const note =
+        `[文件 ${path} 第 ${offset}~${end} 行 / 共 ${total} 行` +
+        (done ? '，已到文件末尾]' : '，后面还有内容，需要就加大 offset 继续读]')
+
+      return note + '\n' + content
     } catch (e) {
-      return `错误:无法读取 "${path}"(${String(e)})。可以先用 run_bash 执行 ls 确认路径。`
+      return `错误：无法读取 "${path}"(${String(e)})。可以先用 run_bash 执行 ls 确认路径。`
     }
   },
 }
+
 
 // ─────────────────────────── write_file ───────────────────────────
 
