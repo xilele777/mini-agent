@@ -32,6 +32,9 @@ src/
   index.ts          阶段 0 的最小 API 调用 demo，可保留但不是当前入口
   llm.ts            环境变量校验，导出 client 和 MODEL
   agent.ts          多轮 REPL、Agent Loop、确认流程和 Ctrl+C 处理
+  context.ts        工具结果截断 truncateToolResult、历史裁剪 trimHistory、
+                    循环守卫 detectRepeatedCall
+  context.test.ts   最小自动化测试（node:test）
   ui.ts             全进程唯一的 readline 输入封装
   approval.ts       y / n / a 确认机制与本次进程的动作批准缓存
   tools/
@@ -41,6 +44,7 @@ src/
     time.ts          current_time 工具
     fs.ts            read_file / write_file 工具
     bash.ts          run_bash 工具
+    grep.ts          search_files 定位工具（grep 按行搜索）
     index.ts         工具注册表、Schema 生成、prepareCall、executeCall
 ```
 
@@ -53,7 +57,9 @@ src/
 2. ✅ 换成原生 Function Calling
 3. ✅ **抽 Tool 接口与注册表（zod v4 `toJSONSchema`）**
 4. ✅ **真实副作用工具 + 执行前确认机制**
-5. ⬜ **上下文管理 + 循环护栏** ← 下一阶段
+5. ✅ **上下文管理 + 循环护栏**
+
+阶段 5 之后的迭代方向见 `docs/superpowers/specs/2026-08-30-mini-agent-learning-path-design.md` 的「后续迭代方向」。
 
 阶段 4 的详细设计和实测记录在：
 
@@ -284,30 +290,43 @@ find src -type f -name '*.ts' -delete
 2. 危险检测是正则提示，不是 shell 解析器，也不是沙箱；没有命中提示不代表安全；
 3. `write_file` 没有限制目标必须位于项目目录内，批准前必须检查完整路径；
 4. `read_file` 没有解析符号链接后的真实路径；
-5. `read_file` 会把完整文件内容放进上下文，超长文件可能造成 token 压力；
-6. `messages` 会跨 REPL 输入持续增长，尚未做历史裁剪；
-7. 当前只有 `MAX_ITERATIONS`，尚未检测重复工具调用造成的死循环；
-8. 当前没有自动化测试，阶段验收使用类型检查和手工实验；
+5. `read_file` 会把完整文件内容放进上下文，超长文件可能造成 token 压力（阶段 5 已用截断缓解，`truncateToolResult` 保留头尾并注明省略，但中间内容仍会丢失，不能保证不超限）；
+6. `messages` 跨 REPL 输入的历史裁剪已通过阶段 5 的 `trimHistory`（按"轮"裁剪、保留 system）缓解；但 KEEP_TURNS 定死为 6，超长单文件的多次连续读取仍可能被裁掉中间轮次；
+7. 循环护栏已加入 `detectRepeatedCall`（连续 N 次同名同参触发）；但阈值和告警措辞仍是硬编码，不同任务可能误伤合法重试；
+8. 已加入最小自动化测试（`node:test`，覆盖截断与循环护栏），但 coverage 有限，仅覆盖纯函数；
 9. 当前 `a` 使用 `JSON.stringify` 生成动作 key，尚未做通用的 canonical JSON 规范化；当前工具参数形状下已足够，但未来可加强。
 
-第 5～7 项是阶段 5 的明确工作范围，不在阶段 4 补做。
+第 5～8 项已由阶段 5 缓解或加入；第 9 项（canonical JSON）仍作为未来可改进项保留。
 
-## 阶段 5 入口
+## 阶段 5 完成内容
 
-阶段 4 后 Agent 已经具备真实副作用，`messages` 也开始承载文件内容和工具结果。阶段 5 聚焦上下文工程：
+阶段 5 聚焦上下文工程，五项全部完成：
 
-1. 工具结果截断，并注明省略了什么；
-2. 历史裁剪，始终保留 system 消息并保持 Function Calling 消息边界合法；
-3. 在 `MAX_ITERATIONS` 之外增加连续重复调用检测；
-4. 增加可观察的上下文统计，帮助理解 token 成本和 O(N²) 历史重发；
-5. 为裁剪和护栏补上最小自动化测试。
+1. **工具结果截断** `truncateToolResult`：超 4000 字符时保留开头 3000 + 结尾 1000，显式标注省略的字符数，并提示模型用 read_file 分段补读。在 `handleCall` 内统一应用（截断只发生在发给模型的通道，工具层保持完整诚实）。
+2. **历史裁剪** `trimHistory`：永不触碰 system；按"一轮 = 一条 user + 它引发的所有 assistant/tool 配对"整轮裁剪；`KEEP_TURNS = 6`。在 `main` 里 push 新输入之前调用，保证此刻上一轮必然完整、不会切开 tool_call 配对。纯函数返回新数组，不改原数组。
+3. **循环护栏** `detectRepeatedCall`：连续 N 次调用同一工具且参数逐字相同时触发；agent.ts 的 `runTurn` 维护调用记录，命中即回填一条引导消息（配对仍然完整），连续触发 `MAX_LOOP_HITS` 次强制终止本轮。判据刻意收窄——换参数、穿插其他工具的探索不拦。
+4. **上下文可观测**：每轮打印 `[ctx] 本轮 prompt=… completion=… total=…`。
+5. **最小自动化测试**：`src/context.test.ts`（node:test），覆盖截断与循环护栏的纯函数，无新增依赖。
+
+### 阶段 5 实测验收
+
+- **历史裁剪生效**：连续 9 个独立小问题，`prompt=` 从 1319 单边涨到 9015 后，第 8、9 题回落到 8774 / 8204 —— 历史被锁在最近 6 轮规模，成本封顶，与"O(N²) 全部重发"形成对比。关键边界（tool_call 配对不被切开）全程无 400。
+- **循环守卫识别**：demo 5 用例全部符合预期——不足阈值 / 参数变化 / 穿插其他工具 → 无恙；3 条完全相同 / 尾部连续相同 → 触发。
+- **测试全绿**：`npx tsx --test src/context.test.ts` → 7 条 pass、0 fail。
+- **类型检查**：`npx tsc --noEmit` 干净通过。
 
 阶段 5 的核心问题：
 
 > Agent 能做事之后，如何控制它看到多少历史，如何避免上下文膨胀和无意义循环？
 
+——通过"截断 + 整轮裁剪 + 循环守卫"三件套给出答案，并用 `[ctx]` 确认成本确实被封顶。
+
 ## 相关文档
 
 - 阶段路线设计：`docs/superpowers/specs/2026-08-30-mini-agent-learning-path-design.md`
 - 阶段 4 设计与验收：`docs/superpowers/specs/2026-09-02-stage4-side-effect-tools-design.md`
+- 阶段 5 交付参考实现：
+  - `docs/grep_tool_source.md`（search_files 完整源码）
+  - `docs/trim_history_source.md`（② 历史裁剪源码与接入）
+  - `docs/loop_guard_source.md`（③ 循环守卫源码与接入）
 - 当前交接：`docs/HANDOFF.md`
