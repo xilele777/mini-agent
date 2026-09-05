@@ -5,9 +5,10 @@ import { calcTool } from './calc.js'
 import { timeTool } from './time.js'
 import { readFileTool, writeFileTool } from './fs.js'
 import { bashTool } from './bash.js'
+import { grepTool } from './grep.js'
 
 // ↓↓↓ 新增工具时，全项目唯一需要改的一行 ↓↓↓
-const ALL_TOOLS: Tool[] = [calcTool, timeTool, readFileTool, writeFileTool, bashTool]
+const ALL_TOOLS: Tool[] = [calcTool, timeTool, readFileTool, writeFileTool, bashTool, grepTool]
 
 const REGISTRY = new Map(ALL_TOOLS.map((t) => [t.name, t]))
 
