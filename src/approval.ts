@@ -2,14 +2,11 @@ import type { Tool } from './tools/types.js'
 import { ask } from './ui.js'
 
 /**
- * 本次进程内被永久放行的具体动作。
+ * 本次进程内"相同动作不再询问"的缓存。
  *
- * key 不是单纯的工具名，而是：
- *
- *   工具名 + 完整参数
- *
- * 这样对 run_bash 的 pwd 按 a，不会导致 rm -rf src 也被自动批准。
- * 这些记录只存在于内存中，程序重启后全部失效。
+ * key 不是工具名,而是 工具名 + 完整参数:
+ * 对 run_bash 的 pwd 按 a,不会让 rm -rf src 也免确认。
+ * 只存内存,重启即失效,不落盘。
  */
 const alwaysAllowed = new Set<string>()
 
@@ -27,8 +24,7 @@ export async function requestApproval(tool: Tool, args: unknown): Promise<boolea
     return true
   }
 
-  // 工具没写 preview 时的兜底。
-  // 默认行为必须是合理的，而不是因为缺少 preview 就崩溃。
+  // 工具没写 preview 时兜底:默认得可用,不能因为没有 preview 就崩
   const detail = tool.preview ? tool.preview(args) : JSON.stringify(args, null, 2)
 
   console.log(`\n${LINE}`)

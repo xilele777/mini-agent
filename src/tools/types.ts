@@ -10,8 +10,8 @@ export interface Tool<A = any> {
   needsApproval?: boolean
 
   /**
-   * 给人看的自我描述 —— 和 description(给模型看的)是一对。
-   * needsApproval 为 true 时应当提供;不提供则退化成打印原始 JSON。
+   * 给人看的动作描述 —— 与给模型看的 description 是一对。
+   * needsApproval 为 true 时应当提供;没提供就退化成打印原始参数。
    */
   preview?: (args: A) => string
 }

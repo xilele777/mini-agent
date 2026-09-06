@@ -1,19 +1,35 @@
 {
   "name": "mini-agent",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx src/agent.ts"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "description": "A local CLI AI agent built on the OpenAI-compatible API, with tool calling, human-in-the-loop approval for side effects, and guardrails.",
   "type": "module",
+  "private": true,
+  "license": "ISC",
+  "author": "xilele777",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xilele777/mini-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xilele777/mini-agent/issues"
+  },
+  "homepage": "https://github.com/xilele777/mini-agent",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "llm",
+    "function-calling",
+    "typescript"
+  ],
+  "scripts": {
+    "dev": "tsx src/agent.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/context.test.ts src/guard.test.ts src/tools/fs.test.ts"
+  },
   "dependencies": {
     "dotenv": "^17.4.2",
     "openai": "^7.8.0",

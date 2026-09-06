@@ -1,32 +1,26 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { z } from 'zod'
+import { ROOT, guardPathRead } from '../guard.js'
 import type { Tool } from './types.js'
 
-const ROOT = process.cwd()
 const PREVIEW_LINES = 20
 
 /**
- * 判断解析后的绝对路径是否仍在项目目录内。
+ * 单文件最大整读字节数。比这大就拒绝,避免把整个大文件读进内存。
  *
- * 为什么不用字符串前缀比较(abs.startsWith(ROOT)):
- * ROOT = /home/me/app 时,/home/me/app-backup 也以它开头,会被误判成"在里面"。
- * relative() 的返回值天然表达了包含关系:在里面就是 "src/a.ts",
- * 在外面必然以 ".." 开头(或在 Windows 跨盘符时返回绝对路径)。
+ * 简化策略:真要流式读大文件得换 fd + 流接口。
+ * 现在只需挡住几百 MB 日志 / 构建产物这类"整读必然出事"的用法,
+ * 并让模型明确知道是"太大读不了",而不是看到一串被截断的乱码。
  */
-function insideRoot(abs: string): boolean {
-  const rel = relative(ROOT, abs)
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
-}
+export const MAX_READ_BYTES = 5 * 1024 * 1024
 
-/** 读到就会进 context,进了 context 就可能被后续某条命令带出去 */
-const BLOCKED = [
-  { re: /(^|[/\\])\.env($|\.)/i, why: '.env 里通常放着 API key' },
-  { re: /(^|[/\\])\.git([/\\]|$)/i, why: '.git 内部对象不该进上下文' },
-  { re: /(^|[/\\])node_modules([/\\]|$)/i, why: 'node_modules 会瞬间撑爆上下文' },
-  { re: /(^|[/\\])id_rsa|\.(pem|key)$/i, why: '这看起来是私钥' },
-]
+function readLimit(): number {
+  const v = Number(process.env.MINI_AGENT_MAX_READ_MB)
+  if (!Number.isFinite(v) || v <= 0) return MAX_READ_BYTES
+  return v * 1024 * 1024
+}
 
 // ─────────────────────────── read_file ───────────────────────────
 
@@ -43,31 +37,31 @@ export const readFileTool: Tool<z.infer<typeof readParams>> = {
   description:
     '读取项目目录内一个文本文件的一段内容（按行分页）。默认读前 500 行。' +
     '文件很长时一次读不完，必须靠 offset 和 limit 分段翻页，直到看到"[已到文件末尾]"。' +
-    '只能读项目目录以内的文件，读不到 .env、.git、node_modules 和私钥文件。' +
+    '只能读项目目录以内的文件，读不到 .env、.git、node_modules、私钥文件和超过上限的大文件。' +
     '要修改文件时，必须先用本工具读出原内容，不要凭记忆重写。',
   schema: readParams,
 
   execute: async ({ path, offset, limit }) => {
     const abs = resolve(ROOT, path)
 
-    if (!insideRoot(abs)) {
-      return `错误：拒绝读取 "${path}"。它解析后指向 ${abs}，在项目目录(${ROOT})之外。只能读项目目录以内的文件。`
-    }
-
-    const hit = BLOCKED.find((b) => b.re.test(abs))
-    if (hit) {
-      return `错误：拒绝读取 "${path}" —— ${hit.why}。请换一个文件，不要尝试绕过这条限制。`
-    }
+    const guarded = await guardPathRead(abs)
+    if (!guarded.ok) return guarded.message
 
     try {
+      const st = await stat(abs)
+      if (st.size > readLimit()) {
+        return `错误:拒绝读取 "${path}" —— 文件 ${st.size} 字节,超过单次读取上限 ${Math.floor(readLimit() / 1024 / 1024)}MB。` +
+          `可以用 run_bash 的 ls / head / tail 处理这类大文件,或用 grep 搜索它的关键内容。`
+      }
+
       const all = await readFile(abs, 'utf8')
-      // 按行切开。结尾的换行符会多产出一个空串，先剥掉，否则行号会虚高 1
+      // 按行切开。结尾的换行符会多产出一个空串,先剥掉,否则行号会虚高 1
       const lines = all.split('\n')
       if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
 
       const total = lines.length
 
-      // offset 超出文件末尾：这一页是空的，明确告诉模型"没有了"，别让它空等
+      // offset 超出文件末尾:这一页是空的,明确告诉模型"没有了",别让它空等
       if (offset > total) {
         return `[文件 ${path} 共 ${total} 行，第 ${offset} 行已超出范围，没有更多内容]`
       }
@@ -81,7 +75,7 @@ export const readFileTool: Tool<z.infer<typeof readParams>> = {
 
       return note + '\n' + content
     } catch (e) {
-      return `错误：无法读取 "${path}"(${String(e)})。可以先用 run_bash 执行 ls 确认路径。`
+      return `错误:无法读取 "${path}"(${String(e)})。可以先用 run_bash 执行 ls 确认路径。`
     }
   },
 }

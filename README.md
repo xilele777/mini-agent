@@ -1,209 +1,146 @@
 # mini-agent
 
-一个使用 TypeScript 和 OpenAI SDK 编写的本地命令行 AI Agent。
+一个跑在本地终端里的命令行 AI Agent,用 TypeScript 和 [OpenAI SDK](https://github.com/openai/openai-node) 编写,连接任意 OpenAI-compatible API。
 
-它可以在终端中与用户持续对话，并根据模型发起的工具调用读取文件、写入文件、执行 Shell 命令、计算数学表达式以及获取本地时间。涉及文件写入或命令执行时，程序会先展示操作内容并请求用户批准。
+它可以和你持续对话,并借助模型发起的工具调用读文件、搜代码、写文件、执行 shell 命令、算表达式、取本地时间。凡是有副作用的操作(写文件、跑命令),执行前都会把完整内容摆到你面前,由你批准。
 
-## 功能
+## ✨ 功能特性
 
 - 命令行多轮对话
-- OpenAI-compatible API 支持
-- 工具调用与参数校验
-- 读取项目目录内的文本文件
-- 新建或完整覆盖文件
-- 执行 Shell 命令
-- 基础数学表达式计算
-- 获取当前本地日期和时间
-- 对有副作用的操作进行人工确认
-- 用户拒绝后禁止 Agent 自动重试或换一种方式绕过
-- 工具调用失败时自动回滚本轮对话历史
+- OpenAI-compatible API(自带/中转站均可)
+- 原生 Function Calling + zod 参数校验
+- 内置六种工具(见下)
+- **有副作用的操作人工确认**:写文件、执行命令前展示预览,批准后才执行
+- **用户拒绝后模型不得重试或换工具绕过**
+- 上下文工程:工具结果截断、按轮裁剪历史、循环调用守卫
+- 路径安全:读文件的工具被限制在项目目录内,并有敏感名单
 
-## 技术栈
+## 📦 内置工具
 
-- Node.js
-- TypeScript
-- OpenAI Node SDK
-- Zod
-- tsx
-- dotenv
+| 工具 | 用途 | 需确认? |
+| --- | --- | --- |
+| `calculate` | 计算基础数学表达式 | 否 |
+| `current_time` | 获取本地日期和时间 | 否 |
+| `read_file` | 按行分页读取项目内文本文件 | 否 |
+| `search_files` | 在项目内按行搜索文本 | 否 |
+| `write_file` | 新建或完整覆盖文件 | 是 |
+| `run_bash` | 执行 shell 命令 | 是 |
 
-## 环境要求
+## 🚀 快速开始
 
-- Node.js 22 或更高版本
+### 环境要求
+
+- Node.js 22+(`openai@7.8.0` 要求)
 - npm
 - 可访问的 OpenAI-compatible API
-- Windows 环境下需要确保 `bash.exe` 可用，例如安装 Git for Windows 并将 Git Bash 加入 `PATH`
+- Windows 下需保证 `bash.exe` 可用(如安装 Git for Windows 并把 Git Bash 加入 `PATH`)
 
-> `openai@7.8.0` 要求 Node.js `>=22.0.0`。
-
-## 安装
+### 安装与配置
 
 ```bash
 npm install
 ```
 
-## 配置
-
-在项目根目录创建 `.env` 文件：
+在项目根目录创建 `.env`:
 
 ```env
 OPENAI_API_KEY=your_api_key
 OPENAI_BASE_URL=https://your-api-endpoint.example/v1
 ```
 
-当前模型在 `src/llm.ts` 中配置：
+> 不要提交 `.env`,也不要在日志、Issue 或聊天中公开 API Key。
+
+当前模型名写在 [src/llm.ts](src/llm.ts) 的 `MODEL` 里,按你的 API 服务改:
 
 ```ts
 export const MODEL = 'gpt-5.6-sol'
 ```
 
-请根据所使用的 API 服务修改为实际可用的模型名称。
-
-> 不要提交 `.env` 文件，也不要在日志、Issue 或聊天内容中公开 API Key。
-
-## 启动
+### 启动
 
 ```bash
 npm run dev
 ```
 
-启动后可以直接输入自然语言指令：
-
 ```text
 mini-agent 已启动。输入 exit 退出。
-工作目录：F:\project\mini-agent
+工作目录:F:\project\mini-agent
 
-你> 读一下 package.json，告诉我项目有哪些依赖
+你> 读一下 package.json,告诉我项目有哪些依赖
 ```
 
-输入以下任一命令退出：
+输入 `exit` / `quit` 退出。
+
+### 批准操作
+
+写文件、执行 shell 前会弹出确认:
 
 ```text
-exit
-quit
+批准?  [y] 允许   [n] 拒绝   [a] 相同动作不再询问 >
 ```
 
-## 操作确认
+- `y` 仅批准当前这一次
+- `n` 拒绝当前操作(模型会收到"用户拒绝"并停下询问,而不是换个方式再来)
+- `a` 本次会话内不再询问**完全相同**的动作,程序重启后失效
 
-文件写入和 Shell 命令执行前会出现确认提示：
+批准前请看清楚文件路径、完整命令和危险提示。按工具"名 + 参数"记忆,所以放过 `pwd` 不会连带放行 `rm -rf src`。
 
-```text
-批准?  [y] 允许   [n] 拒绝   [a] 本次会话都允许 >
-```
+## 🧱 工作原理
 
-选项说明：
+1. 你在终端输入指令。
+2. Agent 把对话历史 + 工具定义发给模型。
+3. 模型返回普通文本 → 直接输出;请求调用工具 → 进入下一步。
+4. 参数经 zod 校验,有副作用的工具先请求批准。
+5. 工具结果以 `tool` 消息回填,Agent 继续问模型。
+6. 直到模型给出最终回复,或超过单轮迭代上限(默认 10 轮)。
 
-- `y`：仅批准当前操作
-- `n`：拒绝当前操作
-- `a`：本次会话中自动批准完全相同的操作，程序重启后失效
+对话历史是 Agent 的全部记忆:长对话按"一轮"裁剪,只保留最近几轮;单次输入中若模型原地重复调用同一工具,会被循环守卫拦下。
 
-批准前请仔细检查显示的文件路径、完整命令和危险操作提醒。
+## 🛡️ 安全边界
 
-## 内置工具
+安全模型分两类,别混为一谈:
 
-| 工具 | 用途 | 是否需要确认 |
+| 通道 | 强制边界? | 边界是什么 |
 | --- | --- | --- |
-| `calculate` | 计算基础数学表达式 | 否 |
-| `current_time` | 获取本地日期和时间 | 否 |
-| `read_file` | 读取项目目录内的文本文件 | 否 |
-| `write_file` | 新建或完整覆盖文件 | 是 |
-| `run_bash` | 执行 Shell 命令 | 是 |
+| `read_file` / `search_files`(免审批读取) | ✅ 代码强制 | 项目目录内;拒绝 .env/.git/node_modules/私钥;realpath 校验符号链接;超限文件拒绝 |
+| `write_file` / `run_bash`(人工审批) | ❌ 靠人 | 展示预览后由你批准;不做伪白名单 |
 
-## 安全限制
+读文件的工具会把内容带进模型上下文,所以它们必须自己在代码里守边界。写文件和 shell 能碰到项目外,人工批准是唯一闸门 —— **这些都不是完整沙箱**,批准前请自行判断。
 
-### 文件读取
+具体规则:
 
-`read_file` 只能读取当前项目目录内的文件，并拒绝读取以下敏感或体积较大的内容：
+- `read_file` 只读项目目录内文件,遇 `.env`、`.git`、`node_modules`、`id_rsa`、`.pem`/`.key` 一律拒绝;单个文件超过 5MB 整读会被拒绝(可用 `MINI_AGENT_MAX_READ_MB` 环境变量调整上限)。
+- `search_files` 走同一套名单,递归时不跟随符号链接/ junction(起始目录若本身是链接,直接拒绝)。
+- `run_bash` 不做命令白名单,用正则提示危险模式(删除、重定向、网络、提权等)。单条命令最长运行 30 秒;输出超过 1MiB 会被中断并如实报告。
 
-- `.env` 及其变体
-- `.git`
-- `node_modules`
-- `id_rsa`
-- `.pem` 和 `.key` 私钥文件
+## ✅ 开发
 
-### 文件写入
+```bash
+npm run typecheck   # 类型检查
+npm test            # 运行单元测试(node:test)
+```
 
-`write_file` 使用完整覆盖模式。目标文件已存在时，原内容会被全部替换。执行前会显示目标路径和内容预览，并要求人工确认。
-
-### Shell 命令
-
-`run_bash` 执行前始终要求人工确认，并对删除文件、输出重定向、网络访问、提权、危险 Git 操作等模式给出提醒。
-
-这些提醒不是完整的安全沙箱。模型生成的命令仍可能产生不可逆影响，请在批准前自行检查。
-
-- 单条命令最长运行 30 秒
-- 不要执行需要交互输入的程序，例如 `vim`、`top` 或等待确认的安装命令
-- 命令输出过长时会被截断
-- Windows 默认使用 `bash.exe`
-
-## 项目结构
+## 🗺️ 项目结构
 
 ```text
 mini-agent/
 ├─ src/
-│  ├─ agent.ts          # Agent 主循环与工具调用流程
-│  ├─ llm.ts            # OpenAI 客户端、API 配置和模型名称
-│  ├─ approval.ts       # 人工确认机制
-│  ├─ ui.ts             # 命令行输入界面
-│  └─ tools/
-│     ├─ index.ts       # 工具注册、Schema 生成和调用分发
-│     ├─ types.ts       # 工具类型定义
-│     ├─ fs.ts          # 文件读取与写入工具
-│     ├─ bash.ts        # Shell 命令工具
-│     ├─ calc.ts        # 数学计算工具
-│     └─ time.ts        # 本地时间工具
-├─ package.json
-├─ package-lock.json
-├─ tsconfig.json
-└─ README.md
+│  ├─ agent.ts          # Agent 主循环、工具调用与循环守卫接入
+│  ├─ approval.ts       # y/n/a 人工确认
+│  ├─ context.ts        # 工具结果截断、历史裁剪、循环守卫
+│  ├─ guard.ts          # 共享路径守卫(项目边界 + 敏感名单 + realpath)
+│  ├─ llm.ts            # OpenAI 客户端与模型名
+│  ├─ ui.ts             # 全进程唯一 readline 封装
+│  ├─ tools/
+│  │  ├─ index.ts       # 注册表、schema 生成、prepareCall / executeCall
+│  │  ├─ types.ts       # Tool 接口定义
+│  │  ├─ fs.ts / grep.ts / bash.ts / calc.ts / time.ts
+│  └─ *.test.ts         # 纯函数与路径守卫的最小自动化测试
+├─ CHANGELOG.md
+├─ LICENSE
+└─ package.json
 ```
 
-## 工作原理
+## 📜 License
 
-1. 用户在终端输入指令。
-2. Agent 将对话历史和工具定义发送给模型。
-3. 如果模型返回普通文本，Agent 将结果输出到终端。
-4. 如果模型请求调用工具，Agent 会校验工具名称、JSON 参数和 Zod Schema。
-5. 有副作用的工具会先请求用户批准。
-6. 工具执行结果作为 `tool` 消息回填给模型。
-7. Agent 继续请求模型，直到得到最终回复，或达到单轮最大迭代次数。
-
-每次用户输入最多允许 10 轮模型调用。若本轮出现异常，程序会回滚本轮新增的消息，避免不完整的 `tool_calls` 历史导致后续请求失败。
-
-## 添加新工具
-
-1. 在 `src/tools/` 中创建工具模块。
-2. 使用 Zod 定义参数 Schema。
-3. 实现 `Tool` 接口中的 `name`、`description`、`schema` 和 `execute`。
-4. 如果工具有副作用，设置 `needsApproval: true`，并建议实现 `preview`。
-5. 在 `src/tools/index.ts` 的 `ALL_TOOLS` 数组中注册工具。
-
-示例：
-
-```ts
-import { z } from 'zod'
-import type { Tool } from './types.js'
-
-const params = z.object({
-  text: z.string().min(1),
-})
-
-export const echoTool: Tool<z.infer<typeof params>> = {
-  name: 'echo',
-  description: '原样返回一段文本。',
-  schema: params,
-  execute: ({ text }) => text,
-}
-```
-
-## 已知限制
-
-- 当前没有自动化测试。
-- 当前模型名称直接写在源码中，而不是通过环境变量配置。
-- `write_file` 本身没有像 `read_file` 一样限制目标必须位于项目目录内，批准写入前应特别检查路径。
-- Shell 工具依赖本机 Bash 配置；如果 Windows 中找不到 `bash.exe`，命令将无法执行。
-- 危险命令检测基于正则提示，不能替代沙箱或人工审查。
-
-## License
-
-ISC
+[ISC](LICENSE)

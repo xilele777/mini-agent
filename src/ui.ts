@@ -4,9 +4,10 @@ import type { Interface } from 'node:readline/promises'
 /**
  * 全进程唯一的 readline 实例。
  *
- * 为什么必须唯一:REPL 要读你的指令,确认机制也要读 y/n,两处都要 stdin。
- * 创建第二个 interface 会让两个实例争抢同一个 stdin —— 表现是按键丢失或者一次输入被两边各收到一半,而且极难排查。
- * 为什么懒初始化:createInterface 会立刻挂到 stdin 上,这会让Node 认为"还有事件源活着"从而不肯退出进程。写在模块顶层的话,任何人 import 了, 这个文件都会中招 —— 这就是你之前记下的"模块被 import 时不应有副作用"。
+ * 必须唯一:REPL 要读指令,确认机制也要读 y/n,两处共用 stdin。
+ * 建第二个实例会互相抢输入 —— 按键丢失,或一次输入被两半截胡,还极难排查。
+ * 懒初始化:createInterface 会立刻挂到 stdin,让 Node 以为还有事件源而不退出进程。
+ * 放模块顶层的话,谁 import 这个文件都中招 —— 模块不该因被 import 而带来副作用。
  */
 let rl: Interface | null = null
 

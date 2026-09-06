@@ -1,9 +1,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
+import { guardDirRead, isBlocked, ROOT } from '../guard.js'
 import type { Tool } from './types.js'
-
-const ROOT = process.cwd()
 
 /** 这些目录里多半是第三方依赖或构建产物，搜了也是噪音，直接跳过 */
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'coverage', '.next', '.cache'])
@@ -26,8 +25,12 @@ function globToRegex(glob: string): RegExp {
 }
 
 /**
- * 递归走目录，把每个文件交给 onFile。
- * 读不到、够不着的条目直接跳过 —— 搜索要的是尽力而为，不是报错中断。
+ * 递归走目录,把每个文件交给 onFile。
+ * 读不到、够不着的条目直接跳过 —— 搜索要的是尽力而为,不是报错中断。
+ *
+ * symlink / junction 条目一律不跟随:只认 isDirectory() / isFile(),
+ * 两者对链接条目都返回 false(Windows 实测)。既不会顺着项目里的链接
+ * 把项目外内容拉进搜索结果,也省了逐条目 realpath 的开销。
  */
 async function walk(dir: string, onFile: (file: string) => Promise<void>): Promise<void> {
   let entries
@@ -60,14 +63,14 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
   description:
     '在项目目录内按行搜索文本，返回"相对路径:行号:该行内容"列表。' +
     '这是定位代码、符号、关键字的第一选择：先搜出目标行号，再用 read_file 的 offset 精准读那几行，不要整页整页地扫大文件。' +
-    'pattern 是正则表达式，不要加引号。自动跳过 .git、node_modules、dist 等目录和大于 2MB 的文件。' +
+    'pattern 是正则表达式，不要加引号。自动跳过 .git、node_modules、dist、.env 等敏感目录/文件，大于 2MB 的文件，以及符号链接。' +
     '结果有上限，没搜到或结果太多时，换更宽或更窄的关键词再试。',
   schema: grepParams,
 
   execute: async ({ pattern, path, glob, maxResults }) => {
-    // 正则不合法：把错误当作结果返回，而不是抛出。
-    // throw 会走 executeCall 的兜底，语义是"工具坏了"；这里只是"模型这次正则说错了"，
-    // 应当原样反馈给模型，让它自己改 —— 这就是工具诚实原则。
+    // 正则不合法:把错误当结果返回,而不是抛出。
+    // throw 会走 executeCall 的兜底,语义是"工具坏了";这里只是"模型这次正则说错了",
+    // 应原样反馈让模型自己改 —— 工具诚实原则。
     let re: RegExp
     try {
       re = new RegExp(pattern)
@@ -76,12 +79,8 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
     }
 
     const root = resolve(ROOT, path)
-
-    // 和 read_file 同一套「必须在项目内」的边界检查，防止把整个磁盘翻出来
-    const rel = relative(ROOT, root)
-    if (isAbsolute(rel) || rel.startsWith('..')) {
-      return `错误:"${path}" 解析到 ${root}，在项目目录(${ROOT})之外。只能搜项目目录以内。`
-    }
+    const guard = await guardDirRead(root)
+    if (!guard.ok) return guard.message
 
     const fileFilter = glob ? globToRegex(glob) : null
     const hits: Hit[] = []
@@ -90,6 +89,10 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
 
     await walk(root, async (file) => {
       if (done()) return
+
+      // 搜索会把文件内容原样送进模型上下文,所以套和 read_file 同一套封锁名单
+      // (.env / .git / node_modules / 私钥)。read_file 拒读的,search_files 不能是旁路。
+      if (isBlocked(file)) return
 
       const relPath = relative(ROOT, file) // 输出相对路径：比绝对路径短一截，省 token
       if (fileFilter && !fileFilter.test(basename(file))) return

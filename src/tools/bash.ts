@@ -7,27 +7,27 @@ const execAsync = promisify(exec)
 
 const TIMEOUT_MS = 30_000
 const MAX_OUTPUT = 4000
+// exec 的 stdout/stderr 缓冲上限:只作"进程不被超大输出憋死"的保护,
+// 常见输出远小于它;一旦命中就会被当作"被中断"如实报告(见 execute 的 catch)。
+const MAX_BUFFER = 1024 * 1024
 
 /**
- * Windows 上 exec 默认走 cmd.exe,但模型生成 bash 命令的质量远高于 cmd,
+ * Windows 上 exec 默认走 cmd.exe,但模型写 bash 的质量远高于 cmd,
  * 而这台机器装了 Git Bash。如果你的 PATH 里没有 bash,把这里改成
- * undefined(并给 SHELL 标上 `string | undefined` 类型)以使用系统默认。
+ * undefined(并把类型标成 `string | undefined`)以退回系统默认 shell。
  */
-const SHELL =
-  process.platform === 'win32'
-    ? 'D:\\Git\\bin\\bash.exe'
-    : '/bin/sh'
+const SHELL = process.platform === 'win32' ? 'D:\\Git\\bin\\bash.exe' : '/bin/sh'
 
 /**
- * 这张表不用来阻止,只用来提醒 —— 增强人的判断力,不替代人的判断。
+ * 这张表不阻止,只提醒 —— 增强人的判断,不替代人的判断。
  *
- * 为什么不阻止:shell 的能力不在命令名里,在组合子里。
- *   echo hi > f.txt       白名单上的 echo,写了文件
- *   cat a && rm b         白名单上的 cat,删了文件
- *   node -e "…rmSync…"    白名单上的 node,递归删目录
- * 要真做白名单就得解析 shell 语法,那是在写一个 shell。
+ * 为什么不阻止:shell 的能力不在命令名里,在组合里。
+ *   echo hi > f.txt        白名单上的 echo,写了文件
+ *   cat a && rm b          白名单上的 cat,删了文件
+ *   node -e "…rmSync…"     白名单上的 node,递归删目录
+ * 真做白名单就得解析 shell 语法,那是在写一个 shell。
  *
- * 宁可多提醒:正则会把 "=>" 当成重定向报出来,这种误报无害;漏报才有害。
+ * 宁可多提醒:正则把 "=>" 当重定向报出来,这种误报无害;漏报才有害。
  */
 const DANGER = [
   { re: /\brm\b/, why: '删除文件' },
@@ -54,6 +54,34 @@ function clip(text: string, label: string): string {
       ? `${text.slice(0, MAX_OUTPUT)}\n…(${label} 共 ${text.length} 字符,已截断)`
       : text
   return `${label}:\n${body}`
+}
+
+/**
+ * exec 在 stdout/stderr 超过 maxBuffer(1 MiB)时不会 reject 成"普通非零退出",
+ * 而是抛一个 code 为字符串的 ERR_CHILD_PROCESS_STDIO_MAXBUFFER 错误,
+ * 并把这个流截到 1 MiB 后**终止子进程**。此时:
+ *   · 把 err.code 当退出码打印,会输出 "exit code ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+ *   · 真实命令可能已被中断,副作用没跑完,不能假装它正常结束。
+ * 所以单独识别它,明确告知模型"输出太大,执行被中断",并把已捕获的部分尽量带上。
+ */
+function isMaxBufferError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const code = (err as { code?: unknown }).code
+  return code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+}
+
+/** 报告一次被中断的执行:退出码 + 已捕获的头/尾输出。 */
+function reportInterrupted(err: { code?: string; killed?: boolean; stdout?: string; stderr?: string }): string {
+  const label = err.killed ? '已超时' : '异常中断'
+  return [
+    `错误:命令输出超过缓冲上限(1 MiB)或执行异常,已被强制终止(${label})。`,
+    '它可能仍在执行,也可能已产生部分副作用 —— 不要把它当成正常完成。',
+    '如果想看大输出的头尾,可用 tail/head 或加管道截取后重试。',
+    clip(err.stdout ?? '', '已捕获的 stdout'),
+    clip(err.stderr ?? '', '已捕获的 stderr'),
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 export const bashTool: Tool<z.infer<typeof bashParams>> = {
@@ -85,14 +113,21 @@ export const bashTool: Tool<z.infer<typeof bashParams>> = {
     try {
       const { stdout, stderr } = await execAsync(command, {
         timeout: TIMEOUT_MS,
-        maxBuffer: 1024 * 1024,
+        maxBuffer: MAX_BUFFER,
         shell: SHELL,
       })
       const parts = [clip(stdout, 'stdout'), clip(stderr, 'stderr')].filter(Boolean)
       return parts.length > 0 ? parts.join('\n\n') : '命令执行成功,没有任何输出。'
     } catch (e) {
-      // exec 在退出码非零时会 reject。但"非零退出"是有用的信息不是故障
+      // exec 在退出码非零时 reject。但"非零退出"是有用的信息,不是故障
       // (grep 没匹配到就返回 1),必须原样交给模型自己判断,不能当异常吞掉。
+      // 例外:输出超缓冲(maxBuffer)不是普通非零退出,单独识别并如实报告"被中断"。
+      if (isMaxBufferError(e)) {
+        return reportInterrupted(
+          e as { code?: string; killed?: boolean; stdout?: string; stderr?: string }
+        )
+      }
+
       const err = e as {
         code?: number
         killed?: boolean

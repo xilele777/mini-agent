@@ -30,42 +30,42 @@ export type PreparedCall =
   | { ok: false; error: string }
 
 /**
- * 关卡一~三：查表 / JSON.parse / schema 校验。
- * 纯同步、零 throw、零副作用 —— 正因如此，可以放心地在人工确认「之前」调用它。
+ * 关卡一~三:查表 / JSON.parse / schema 校验。
+ * 纯同步、零 throw、零副作用 —— 正因如此,才能放心在人工确认"之前"调用。
  */
 export function prepareCall(name: string, rawArgs: string): PreparedCall {
-  // 关卡一：这个工具存在吗
+  // 关卡一:这个工具存在吗
   const tool = REGISTRY.get(name)
   if (!tool) {
     const available = [...REGISTRY.keys()].join('、')
-    return { ok: false, error: `错误：不存在名为 "${name}" 的工具。可用工具只有：${available}` }
+    return { ok: false, error: `错误:不存在名为 "${name}" 的工具。可用工具只有:${available}` }
   }
 
-  // 关卡二：参数是合法 JSON 吗
+  // 关卡二:参数是合法 JSON 吗
   let parsed: unknown
   try {
     parsed = JSON.parse(rawArgs)
   } catch {
-    return { ok: false, error: `错误：工具 "${name}" 的参数不是合法的 JSON。收到的是：${rawArgs}` }
+    return { ok: false, error: `错误:工具 "${name}" 的参数不是合法的 JSON。收到的是:${rawArgs}` }
   }
 
-  // 关卡三：参数符合这个工具自己的 schema 吗
+  // 关卡三:参数符合这个工具自己的 schema 吗
   const result = tool.schema.safeParse(parsed)
   if (!result.success) {
     const detail = result.error.issues
       .map((i) => `${i.path.join('.') || '(根)'}: ${i.message}`)
-      .join('；')
-    return { ok: false, error: `错误：工具 "${name}" 的参数不合法 —— ${detail}。收到的参数是：${rawArgs}` }
+      .join(';')
+    return { ok: false, error: `错误:工具 "${name}" 的参数不合法 —— ${detail}。收到的参数是:${rawArgs}` }
   }
 
   return { ok: true, tool, args: result.data }
 }
 
-/** 关卡四：真正执行。到这里参数已经校验过，且已经拿到人的批准 */
+/** 关卡四:真正执行。到这里参数已通过校验、也已拿到人的批准 */
 export async function executeCall(tool: Tool, args: unknown): Promise<string> {
   try {
     return await tool.execute(args)
   } catch (e) {
-    return `错误：工具 "${tool.name}" 执行时抛出异常：${String(e)}`
+    return `错误:工具 "${tool.name}" 执行时抛出异常:${String(e)}`
   }
 }

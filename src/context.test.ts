@@ -76,7 +76,7 @@ test('截断:短文本不动', () => {
 test('截断:长文本保留头尾加省略标注', () => {
   const long = 'x'.repeat(5000)
   const r = truncateToolResult(long)
-  assert.ok(r.startsWith('[工具结果过长已截断：'))
+  assert.ok(r.startsWith('[工具结果过长已截断:'))
   assert.ok(r.includes('省略中间'))
   assert.ok(r.includes('x'.repeat(3000))) // 头 3000
   assert.ok(r.endsWith('x'.repeat(1000))) // 尾 1000
