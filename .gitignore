@@ -1,2 +1,5 @@
 node_modules
 .env
+
+# 学习/设计过程文档,不进仓库
+docs/
