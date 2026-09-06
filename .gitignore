@@ -3,3 +3,5 @@ node_modules
 
 # 学习/设计过程文档,不进仓库
 docs/
+
+.mini-agent-todo.json
