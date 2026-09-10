@@ -1,6 +1,6 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 import { client, MODEL } from './llm.js'
-import { getToolSchemas, prepareCall, executeCall } from './tools/index.js'
+import { getToolSchemas, prepareCall, executeCall, initTools } from './tools/index.js'
 import { requestApproval } from './approval.js'
 import { ask, closeUI } from './ui.js'
 import { detectRepeatedCall, trimHistory, truncateToolResult } from './context.js'
@@ -159,6 +159,9 @@ async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
 
 async function main(): Promise<void> {
   try {
+    // 启动时把 todo 等有状态工具的磁盘数据读进内存,必须在开跑(ask)之前
+    await initTools()
+    
     // messages 在 while 外面创建 —— 它就是 Agent 的全部记忆
     let messages: ChatCompletionMessageParam[] = [{ role: 'system', content: SYSTEM_PROMPT }]
 

@@ -6,7 +6,7 @@ import { timeTool } from './time.js'
 import { readFileTool, writeFileTool } from './fs.js'
 import { bashTool } from './bash.js'
 import { grepTool } from './grep.js'
-import { addTodoTool, listTodoTool, removeTodoTool } from './todo.js'
+import { addTodoTool, listTodoTool, removeTodoTool, loadTodoFromDisk } from './todo.js'
 
 // ↓↓↓ 新增工具时，全项目唯一需要改的一行 ↓↓↓
 const ALL_TOOLS: Tool[] = [calcTool, timeTool, readFileTool, writeFileTool, bashTool, grepTool, addTodoTool, listTodoTool, removeTodoTool]
@@ -69,4 +69,12 @@ export async function executeCall(tool: Tool, args: unknown): Promise<string> {
   } catch (e) {
     return `错误:工具 "${tool.name}" 执行时抛出异常:${String(e)}`
   }
+}
+
+/**
+ * 一次性启动钩子:让带持久化状态的工具在开跑前把磁盘状态读进内存。
+ * 现在只服务 todo;以后新增有状态工具,把自己的"加载"并进这里即可。
+ */
+export async function initTools(): Promise<void> {
+  await loadTodoFromDisk()
 }
