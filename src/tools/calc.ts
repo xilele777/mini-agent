@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { Tool } from './types.js'
 
+/** 注册表先按此字符集校验算式，再调用 execute；此规则不解析完整的数学语法。 */
 const SAFE = /^[0-9+\-*/(). ]+$/
 
 const calcParams = z.object({

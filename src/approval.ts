@@ -2,16 +2,14 @@ import type { Tool } from './tools/types.js'
 import { ask } from './ui.js'
 
 /**
- * 本次进程内"相同动作不再询问"的缓存。
- *
- * key 不是工具名,而是 工具名 + 完整参数:
- * 对 run_bash 的 pwd 按 a,不会让 rm -rf src 也免确认。
- * 只存内存,重启即失效,不落盘。
+ * 缓存当前进程中按 a 批准的具体动作，重启后失效。
+ * 键由工具名和校验后完整参数的 JSON 组成，参数不同的动作仍需批准。
  */
 const alwaysAllowed = new Set<string>()
 
 const LINE = '─'.repeat(64)
 
+/** 使用 JSON.stringify 的原始键顺序，尚未做参数规范化。 */
 function actionKey(tool: Tool, args: unknown): string {
   return `${tool.name}\u0000${JSON.stringify(args)}`
 }
@@ -24,7 +22,7 @@ export async function requestApproval(tool: Tool, args: unknown): Promise<boolea
     return true
   }
 
-  // 工具没写 preview 时兜底:默认得可用,不能因为没有 preview 就崩
+  // 缺少专用预览时展示完整参数，用户仍能检查具体动作。
   const detail = tool.preview ? tool.preview(args) : JSON.stringify(args, null, 2)
 
   console.log(`\n${LINE}`)

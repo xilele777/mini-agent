@@ -2,35 +2,31 @@ import { realpath } from 'node:fs/promises'
 import { isAbsolute, relative } from 'node:path'
 
 /**
- * 共享的文件路径边界。凡是把文件内容读进模型上下文的工具
- * (read_file、search_files)都必须经过这里;以后新增同类工具也一样。
- *
- * 这套规则最初分散在 fs.ts / grep.ts 里,各守各的、互不一致——
- * search_files 能绕过 read_file 的封锁名单,根因就在这里。
+ * read_file 与 search_files 共用的路径检查，调用方传入已解析的绝对路径。
+ * 检查项目范围、敏感路径及可解析的链接目标；run_bash 不经过这些文件工具检查。
  */
 
-/** 项目根目录,统一取一次 */
+/** 模块加载时记录工作目录，作为文件工具解析相对路径的基准。 */
 export const ROOT = process.cwd()
 
 export interface PathCheck {
   ok: true
-  /** 词法绝对路径(resolve 结果),展示用 */
+  /** 调用方传入的词法绝对路径，用于展示及后续 IO。 */
   abs: string
-  /** 符号链接解析后的真实绝对路径(realpath 结果) */
+  /** realpath 成功时的真实路径；解析失败时回退为 abs。 */
   real: string
 }
 
 export interface PathReject {
   ok: false
-  /** 面向模型的解释文本,含具体原因 */
+  /** 可直接回填给模型的拒绝原因。 */
   message: string
 }
 
 export type PathGuardResult = PathCheck | PathReject
 
 /**
- * 读到就会进上下文,进了上下文就可能被后续某条命令带出去。
- * 所有工具共用的封锁名单 —— 按文件名正则匹配,命中即拒绝。
+ * 文件读取与搜索共用的敏感路径规则，正则匹配完整路径中的文件或目录名。
  */
 export const BLOCKED: { re: RegExp; why: string }[] = [
   { re: /(^|[/\\])\.env($|\.)/i, why: '.env 里通常放着 API key' },
@@ -39,18 +35,14 @@ export const BLOCKED: { re: RegExp; why: string }[] = [
   { re: /(^|[/\\])id_rsa|\.(pem|key)$/i, why: '这看起来是私钥' },
 ]
 
-/** 路径里是否命中封锁名单(只做词法判断,可用在 IO 之前) */
+/** 只检查路径字符串，供文件 IO 之前过滤敏感路径。 */
 export function isBlocked(abs: string): boolean {
   return BLOCKED.some((b) => b.re.test(abs))
 }
 
 /**
- * 判断词法绝对路径是否仍在项目目录内。
- *
- * 为什么不用字符串前缀比较(abs.startsWith(ROOT)):
- * ROOT = /home/me/app 时,/home/me/app-backup 也以它开头,会被误判成"在里面"。
- * relative() 的返回值天然表达包含关系:在里面就是 "src/a.ts",
- * 在外面必然以 ".." 开头(Windows 跨盘符时则返回绝对路径)。
+ * 用相对路径排除项目外路径，避免把同前缀的兄弟目录误判为项目内。
+ * Windows 跨盘时 relative 返回绝对路径；当前实现也拒绝 ROOT 自身。
  */
 function lexicallyInsideRoot(abs: string): boolean {
   const rel = relative(ROOT, abs)
@@ -58,14 +50,9 @@ function lexicallyInsideRoot(abs: string): boolean {
 }
 
 /**
- * 完整路径守卫(词法 + 符号链接),供 read_file 这类单文件工具使用。
- * - path 相对项目根目录解析;
- * - 先做词法检查(insideRoot + BLOCKED),失败立即拒绝,不做无谓 IO;
- * - 再做 realpath:文件若经由 symlink / junction 指向项目外,
- *   词法上看起来"在里面"也照样拒绝。
- *
- * realpath 失败(文件不存在等)时不算越界:词法已通过,说明路径本身在项目内,
- * 交由后续 readFile 报错更诚实,所以这里放行。
+ * 单文件读取检查：先校验词法路径，再对可解析的真实路径重复检查。
+ * 链接指向项目外或敏感路径时拒绝，避免只检查表面的文件名。
+ * realpath 失败时按当前策略放行到后续 IO，此分支没有验证链接目标。
  */
 export async function guardPathRead(abs: string): Promise<PathGuardResult> {
   if (!lexicallyInsideRoot(abs)) {
@@ -104,18 +91,15 @@ export async function guardPathRead(abs: string): Promise<PathGuardResult> {
     }
     return { ok: true, abs, real }
   } catch {
-    // realpath 失败通常是"文件不存在"。词法已通过,把它交给后续 IO 报错
+    // 解析失败时保留词法路径，是否可读交由后续文件 IO 判断。
     return { ok: true, abs, real: abs }
   }
 }
 
 /**
- * 目录守卫:校验一个"作为递归起点的目录"是否安全。
- * - search_files 的 path 参数必须落在项目目录内;
- * - 目录本身是符号链接(junction)时拒绝,防止把项目外整棵树纳入遍历。
- *
- * 注意:BLOCKED 名单不在这里逐项检查 —— 递归过程里由 isBlocked 对每个文件判断,
- * 因为 walk 看到的"条目"才带链接信息;这里只能防住起点本身是链接的情况。
+ * 校验搜索起点的项目范围；链接解析后仍在项目内时允许继续。
+ * 起点自身仍受 lexicallyInsideRoot 约束，当前要求使用项目的子目录。
+ * 敏感文件过滤及递归条目的链接跳过，由搜索工具在遍历时处理。
  */
 export async function guardDirRead(rootAbs: string): Promise<PathGuardResult> {
   if (!lexicallyInsideRoot(rootAbs)) {

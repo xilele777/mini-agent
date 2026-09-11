@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BLOCKED, ROOT, isBlocked, guardPathRead, guardDirRead } from './guard.js'
 
-// 真实临时目录会被路径检查当作"项目外"直接拒绝,
-// 所以下面守卫通过与否都不依赖真实文件是否写入 —— 纯路径语义测试。
+// 项目外路径用系统临时目录构造；链接用例还会创建并清理实际夹具。
 
 function tmpBase(): string {
   const dir = join(tmpdir(), 'miniagent-guard-test')
@@ -26,14 +25,14 @@ test('BLOCKED: 命中 .env / .git / node_modules / 私钥', () => {
 test('BLOCKED: 普通源码文件不误伤', () => {
   assert.ok(!isBlocked(join(ROOT, 'src', 'agent.ts')))
   assert.ok(!isBlocked(join(ROOT, 'package.json')))
-  // 结尾是 .env 的目录名别误伤:…envfile
+  // 普通文件名包含 env 字样时也应放行。
   assert.ok(!isBlocked(join(ROOT, 'src', 'envs.ts')))
 })
 
 test('read 守卫: 项目内文件放行', async () => {
   const r = await guardPathRead(join(ROOT, 'src', 'agent.ts'))
   assert.equal(r.ok, true)
-  // realpath 会把盘符规范化为大写(F:),而 cwd 保留键入的大小写 —— 这里比大小写无关的等价
+  // 兼容 Windows 上 realpath 返回值与输入盘符的大小写差异。
   if (r.ok) assert.equal(r.real.toLowerCase(), r.abs.toLowerCase())
 })
 
@@ -51,6 +50,7 @@ test('read 守卫: 项目内敏感路径拒绝', async () => {
 })
 
 test('read 守卫: 经符号链接指到项目外 → 拒绝', async () => {
+  // 夹具本身位于 ROOT 外，此用例验证拒绝结果，未单独覆盖项目内链接逃逸的分支。
   const dir = join(tmpBase(), 'symlink-escaping')
   await rm(dir, { recursive: true, force: true })
   await mkdir(join(dir, 'outside'), { recursive: true })
@@ -62,7 +62,7 @@ test('read 守卫: 经符号链接指到项目外 → 拒绝', async () => {
     assert.equal(r.ok, false)
     if (!r.ok) assert.match(r.message, /符号链接|之外/)
   } catch (e) {
-    // 无权限创建 junction(个别环境)时,跳过 —— 只测能建链接的环境
+    // 环境不允许创建链接时结束本用例，其他错误继续抛出。
     if ((e as NodeJS.ErrnoException).code !== 'EPERM' && (e as NodeJS.ErrnoException).code !== 'EACCES') throw e
   } finally {
     await rm(dir, { recursive: true, force: true })

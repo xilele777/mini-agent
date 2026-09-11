@@ -4,10 +4,10 @@ import { z } from 'zod'
 import { guardDirRead, isBlocked, ROOT } from '../guard.js'
 import type { Tool } from './types.js'
 
-/** 这些目录里多半是第三方依赖或构建产物，搜了也是噪音，直接跳过 */
+/** 搜索时跳过的版本库、依赖和构建产物目录。 */
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'coverage', '.next', '.cache'])
 
-/** 超过这个大小的文件不整读：把整个文件读进来，比我们要找的那一行贵得多 */
+/** 搜索采用整文件读取，通过大小上限限制单文件的内存开销。 */
 const MAX_FILE_BYTES = 2 * 1024 * 1024
 
 /** 命中行输出时，单行最多保留多少字符，超出的省略 */
@@ -19,18 +19,15 @@ interface Hit {
   text: string
 }
 
+/** 文件名过滤仅支持 * 通配，其余正则特殊字符按字面量匹配。 */
 function globToRegex(glob: string): RegExp {
   const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
   return new RegExp('^' + escaped.replace(/\*/g, '.*') + '$')
 }
 
 /**
- * 递归走目录,把每个文件交给 onFile。
- * 读不到、够不着的条目直接跳过 —— 搜索要的是尽力而为,不是报错中断。
- *
- * symlink / junction 条目一律不跟随:只认 isDirectory() / isFile(),
- * 两者对链接条目都返回 false(Windows 实测)。既不会顺着项目里的链接
- * 把项目外内容拉进搜索结果,也省了逐条目 realpath 的开销。
+ * 递归遍历普通目录与文件，读取目录失败时跳过该目录。
+ * Dirent 的链接条目不会进入 isDirectory / isFile 分支，因此不会主动跟随链接。
  */
 async function walk(dir: string, onFile: (file: string) => Promise<void>): Promise<void> {
   let entries
@@ -68,9 +65,7 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
   schema: grepParams,
 
   execute: async ({ pattern, path, glob, maxResults }) => {
-    // 正则不合法:把错误当结果返回,而不是抛出。
-    // throw 会走 executeCall 的兜底,语义是"工具坏了";这里只是"模型这次正则说错了",
-    // 应原样反馈让模型自己改 —— 工具诚实原则。
+    // 将非法正则作为可修正的参数问题返回，便于模型调整表达式。
     let re: RegExp
     try {
       re = new RegExp(pattern)
@@ -84,17 +79,16 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
 
     const fileFilter = glob ? globToRegex(glob) : null
     const hits: Hit[] = []
-    // 两个循环共用同一个"满了就停"的判断
+    // 达到上限后停止读取文件及匹配行；walk 仍会遍历剩余目录项。
     const done = () => hits.length >= maxResults
 
     await walk(root, async (file) => {
       if (done()) return
 
-      // 搜索会把文件内容原样送进模型上下文,所以套和 read_file 同一套封锁名单
-      // (.env / .git / node_modules / 私钥)。read_file 拒读的,search_files 不能是旁路。
+      // 与单文件读取共用敏感路径规则，避免通过搜索返回被拦截文件的内容。
       if (isBlocked(file)) return
 
-      const relPath = relative(ROOT, file) // 输出相对路径：比绝对路径短一截，省 token
+      const relPath = relative(ROOT, file) // 返回相对路径，便于后续定位与分段读取。
       if (fileFilter && !fileFilter.test(basename(file))) return
 
       let st
@@ -109,7 +103,7 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
       try {
         text = await readFile(file, 'utf8')
       } catch {
-        return // 二进制文件按 utf8 读出来是乱码，跳过
+        return // 读取失败时跳过该文件；此处没有额外的二进制格式检测。
       }
 
       const lines = text.split('\n')

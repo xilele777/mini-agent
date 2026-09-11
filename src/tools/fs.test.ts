@@ -4,8 +4,7 @@ import { tmpdir } from 'node:os'
 import { test } from 'node:test'
 import { readFileTool } from './fs.js'
 
-// read_file 的 execute 以 process.cwd() 为项目根,三类拒绝路径都可在
-// 不触碰真实文件的前提下验证(守卫在 readFile 之前返回)。
+// 这三类输入在路径检查阶段被拒绝，无需创建或读取目标文件。
 
 test('read_file: 项目外路径被拒', async () => {
   const r = await readFileTool.execute({

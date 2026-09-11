@@ -1,17 +1,21 @@
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 import { client, MODEL } from './llm.js'
 import { getToolSchemas, prepareCall, executeCall, initTools } from './tools/index.js'
 import { requestApproval } from './approval.js'
 import { ask, closeUI } from './ui.js'
-import { detectRepeatedCall, trimHistory, truncateToolResult } from './context.js'
-import type { ToolCallLog } from './context.js'
+import {
+  detectRepeatedCall,
+  trimHistory,
+  truncateToolResult,
+  toModelMessages,
+} from './context.js'
+import type { HistoryMessage, ToolCallLog } from './context.js'
 
-/** 单次用户输入内最多问模型几轮。涉及多次文件/命令操作时任务链较长,留够余量 */
+/** 一次真实用户输入最多发起的模型请求数，包含内部继续提示后的请求。 */
 const MAX_ITERATIONS = 10
 
-/** 连续这么多次调用同一工具、参数逐字相同,就判定为原地打转 */
+/** 连续同名、原始参数字符串相同的函数调用达到此次数时，拦截当前调用。 */
 const REPEAT_THRESHOLD = 3
-/** 打转提示触发这么多次仍不收敛,强制终止本轮 */
+/** 本轮累计触发循环守卫的次数上限。 */
 const MAX_LOOP_HITS = 2
 
 const SYSTEM_PROMPT = [
@@ -19,17 +23,30 @@ const SYSTEM_PROMPT = [
   `当前操作系统:${process.platform}`,
   `当前工作目录:${process.cwd()}`,
   '涉及文件写入和命令执行的操作会先交给用户确认,用户有可能拒绝。',
+  '本轮以用户当前请求为目标；任务清单保存计划，不代表所有条目都应在本轮执行。',
+  '此前暂停或被拒绝的任务，只有用户明确要求恢复时才继续。',
 ].join('\n')
 
 /**
- * 用户拒绝时回填给模型的话。
- *
- * 措辞直接决定模型的下一步:写"操作失败"它会当技术故障重试,你就得连按几次 n;
- * 写成下面这样它会停下来问。拒绝时不重试、不换工具绕过,是这个 Agent 的行为底线。
+ * 纯文本回复后，提示模型选择继续执行、询问、完成或暂停。
+ * 此处不查询待办状态，下一步由模型结合当前请求和工具结果判断。
+ */
+const CONTINUE_NUDGE = [
+  '请根据用户当前的要求决定下一步。',
+  '有可以继续执行的步骤时，调用相应工具。',
+  '本次工作已完成时，调用 finish_task。',
+  '缺少必要信息时，调用 ask_user。',
+  '必要操作被拒绝，或用户取消、要求暂停时，调用 pause_task。',
+  '不要反复索要同一项许可，也不要擅自恢复此前被拒绝的旧任务。',
+].join('\n')
+
+/**
+ * 批准被拒绝时回填的说明，引导模型停止重试并在无法继续时暂停。
+ * 当前工具不会执行；是否结束本轮，由后续的控制工具调用决定。
  */
 const REJECTED =
-  '用户拒绝了这次操作。不要重试,也不要换一种方式绕过(比如改用别的工具做同一件事)。' +
-  '请直接告诉用户你原本想做什么、为什么,然后询问他希望怎么办。'
+  '用户拒绝了这次操作。不要重试，也不要换一种方式绕过。' +
+  '如果因此无法继续当前任务，调用 pause_task 说明原因，等待用户新指令。'
 
 function isAbortError(error: unknown): boolean {
   if (error instanceof Error && error.name === 'AbortError') {
@@ -43,12 +60,15 @@ function isAbortError(error: unknown): boolean {
   return false
 }
 
-/** 一条工具调用的完整生命周期:准备 → 确认 → 执行,三条路径都要产出一个字符串 */
-async function handleCall(name: string, rawArgs: string): Promise<string> {
+/** 校验 → 按需批准 → 执行；返回工具结果及结束信号，参数错误或拒绝均不触发结束。 */
+async function handleCall(
+  name: string,
+  rawArgs: string
+): Promise<{ observation: string; endsTurn: boolean }> {
   const prepared = prepareCall(name, rawArgs)
   if (!prepared.ok) {
     console.log(`  ✗ ${name} 参数有误`)
-    return prepared.error
+    return { observation: prepared.error, endsTurn: false }
   }
 
   const { tool, args } = prepared
@@ -57,7 +77,7 @@ async function handleCall(name: string, rawArgs: string): Promise<string> {
     const approved = await requestApproval(tool, args)
     if (!approved) {
       console.log(`  ✗ ${tool.name} 被拒绝`)
-      return REJECTED
+      return { observation: REJECTED, endsTurn: false }
     }
   }
 
@@ -68,20 +88,22 @@ async function handleCall(name: string, rawArgs: string): Promise<string> {
   const more = bounded.includes('\n') ? ' …' : ''
   console.log(`  → ${tool.name} ⇒ ${firstLine}${more}`)
 
-  return bounded
+  return { observation: bounded, endsTurn: tool.endsTurn === true }
 }
 
-/** 跑完一次用户输入:反复问模型 → 执行工具 → 回填,直到模型不再要工具 */
-async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
-  // 工具调用记录。真正的循环是"回复 → 工具 → 回复 → 工具"跨多次响应,
-  // 声明在 for 外面才记得到全部;检测只看末尾一段(见 detectRepeatedCall)。
+/**
+ * 处理一次真实用户输入，循环请求模型、执行工具并回填结果。
+ * 完成或暂停工具、循环守卫、请求次数上限均可结束本轮；异常交给 main 处理。
+ */
+async function runTurn(messages: HistoryMessage[]): Promise<void> {
+  // 跨模型响应记录本轮的函数调用请求，包含随后被校验、批准或守卫拦截的请求。
   const recentCalls: ToolCallLog[] = []
   let loopHits = 0
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.chat.completions.create({
       model: MODEL,
-      messages,
+      messages: toModelMessages(messages),
       tools: getToolSchemas(),
     })
 
@@ -101,7 +123,9 @@ async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
     const toolCalls = message.tool_calls
     if (!toolCalls || toolCalls.length === 0) {
       console.log(`\nAgent: ${message.content ?? '(空回复)'}`)
-      return
+      // 引导模型使用显式出口；内部提示属于当前轮，因此不添加 startsTurn 标记。
+      messages.push({ role: 'user', content: CONTINUE_NUDGE })
+      continue
     }
 
     if (message.content) console.log(`\nAgent: ${message.content}`)
@@ -115,18 +139,15 @@ async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
           argsKey: call.function.arguments,
         })
 
-        // 看门狗先判:同名同参的重复调用 = 原地打转,拦下不执行,
-        // 回填一段引导文本让模型掉头,而不是继续喂它同样的结果。
+        // 重复请求只回填守卫说明，不进入参数校验、批准和执行流程。
         const guard = detectRepeatedCall(recentCalls, REPEAT_THRESHOLD)
         if (guard) {
           loopHits++
           console.log(`  ⚠ ${call.function.name} 触发循环守卫(${loopHits}/${MAX_LOOP_HITS})`)
           messages.push({ role: 'tool', tool_call_id: call.id, content: guard })
           if (loopHits >= MAX_LOOP_HITS) {
-            // 这条 assistant 消息可能还带着后续未处理的 tool_call,
-            // 中止前必须给它们各补一条 tool 回复 —— 否则本轮历史里残留
-            // "assistant 有 tool_call、却没有配对的 tool 消息"的非法段,
-            // 而 checkpoint 记在这个坏段之后,回滚也删不掉它,会话会一直 400。
+            // 正常 return 不触发异常回滚。剩余调用必须补齐结果，
+            // 避免下一次请求复用尚未配对完整的工具调用历史。
             for (const rest of toolCalls.slice(toolCalls.indexOf(call) + 1)) {
               const restName = rest.type === 'function' ? rest.function.name : rest.type
               messages.push({
@@ -144,13 +165,25 @@ async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
         }
       }
 
-      // 每个 tool_call 都必须产出一条配对的 tool 消息,一条都不能少。
-      // 所以不能 `if (type !== 'function') continue` —— 那会漏配对,下一轮必 400。
-      const observation = isFunction
+      // 每个 tool_call 都要有匹配 ID 的结果；不支持的调用类型也要回填说明。
+      const { observation, endsTurn } = isFunction
         ? await handleCall(call.function.name, call.function.arguments)
-        : `错误:不支持的工具调用类型 "${call.type}"。`
+        : { observation: `错误:不支持的工具调用类型 "${call.type}"。`, endsTurn: false }
 
       messages.push({ role: 'tool', tool_call_id: call.id, content: observation })
+
+      if (endsTurn) {
+        // 当前结果已回填；同批剩余调用标为未执行，再将控制权交回 REPL。
+        const remaining = toolCalls.slice(toolCalls.indexOf(call) + 1)
+        for (const rest of remaining) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: rest.id,
+            content: '本轮已结束，此工具调用未执行。等待用户新指令。',
+          })
+        }
+        return
+      }
     }
   }
 
@@ -159,11 +192,13 @@ async function runTurn(messages: ChatCompletionMessageParam[]): Promise<void> {
 
 async function main(): Promise<void> {
   try {
-    // 启动时把 todo 等有状态工具的磁盘数据读进内存,必须在开跑(ask)之前
+    // 通过注册表恢复工具状态，完成后才接收第一条用户请求。
     await initTools()
-    
-    // messages 在 while 外面创建 —— 它就是 Agent 的全部记忆
-    let messages: ChatCompletionMessageParam[] = [{ role: 'system', content: SYSTEM_PROMPT }]
+
+    // 对话历史跨 REPL 输入保留；待办等工具状态由各自模块单独维护。
+    let messages: HistoryMessage[] = [
+      { role: 'system', content: SYSTEM_PROMPT },
+    ]
 
     console.log('mini-agent 已启动。输入 exit 退出。')
     console.log(`工作目录:${process.cwd()}\n`)
@@ -174,13 +209,16 @@ async function main(): Promise<void> {
       if (input === '') continue
       if (input === 'exit' || input === 'quit') break
 
-      // 先裁掉旧轮。必须赶在 push 新输入之前 —— 此刻上一轮必然完整,
-      // 永远不会把 tool_call 配对切成两半。
+      // 上一轮结束后按 startsTurn 整轮裁剪，再加入本轮输入。
       messages = trimHistory(messages)
 
-      // 记下本轮开始前的长度,失败时用来回滚(截断点在本轮 push 之前,回滚必安全)
+      // 保存本轮输入之前的截断点，供异常处理丢弃本轮对话消息。
       const checkpoint = messages.length
-      messages.push({ role: 'user', content: input })
+      messages.push({
+        role: 'user',
+        content: input,
+        startsTurn: true,
+      })
 
       try {
         await runTurn(messages)
@@ -190,8 +228,8 @@ async function main(): Promise<void> {
         }
         console.error(`\n[本轮失败] ${String(e)}`)
 
-        // 失败可能发生在 push 了带 tool_calls 的 assistant 消息之后、
-        // push 配对的 tool 消息之前。回滚到本轮起点,历史就保持合法。
+        // 异常可能留下尚未配对的工具调用，从本轮起点截断可恢复消息结构。
+        // 这里只回滚对话历史，已完成的文件写入、命令或待办变更不会撤销。
         messages.length = checkpoint
         console.error('已回滚本轮,历史保持干净,可直接重新提问')
       }
@@ -208,7 +246,7 @@ async function main(): Promise<void> {
 
     throw e
   } finally {
-    // 正常 exit、quit、Ctrl+C 和异常退出都会关 readline
+    // REPL 结束时统一释放输入资源，正常退出和异常路径共用此处。
     closeUI()
   }
 }

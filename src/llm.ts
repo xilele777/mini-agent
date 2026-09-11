@@ -13,5 +13,5 @@ if (!baseURL) {
 
 export const client = new OpenAI({ apiKey, baseURL })
 
-// 当前走的是中转站。要换模型时改这里即可,不用动其它文件
+// 当前 Agent 入口使用的模型配置，中转地址由 OPENAI_BASE_URL 提供。
 export const MODEL = 'gpt-6-astra'

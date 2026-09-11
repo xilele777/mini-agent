@@ -1,12 +1,25 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
+/** 本地历史消息；startsTurn 只标记真实用户输入，不随 API 请求发送。 */
+export type HistoryMessage = ChatCompletionMessageParam & {
+  startsTurn?: true
+}
+
+/** 创建移除本地标记的请求消息，保留原数组及其轮边界。 */
+export function toModelMessages(
+  messages: HistoryMessage[]
+): ChatCompletionMessageParam[] {
+  return messages.map(({ startsTurn, ...message }) => message)
+}
+
 const MAX_RESULT_CHARS = 4000
 const KEEP_HEAD = 3000
 const KEEP_TAIL = 1000
 
-/** 历史最多保留几"轮"完整对话。练手时改这里,对比 [ctx] 的 prompt 数值体会取舍 */
+/** 裁剪时保留的已结束用户轮数；当前新输入在裁剪后追加。 */
 const KEEP_TURNS = 6
 
+/** 超限结果保留头尾并注明省略内容；附加说明会使返回长度略超字符阈值。 */
 export function truncateToolResult(text: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text
 
@@ -23,54 +36,42 @@ export function truncateToolResult(text: string): string {
 }
 
 /**
- * 把消息历史裁到最近 KEEP_TURNS 轮。
- *
- * 最小不可分割的单位是"一轮":一条 user + 它引发的所有 assistant/tool 配对。
- * 绝不在轮内部下刀 —— 切开 tool_call 与其结果的任何一条,历史就非法了,
- * 下一轮请求必然 400。
+ * 按 startsTurn 保留最近 KEEP_TURNS 个真实用户轮，system 消息始终保留。
+ * 一轮包含用户请求、模型回复、工具结果及内部提示，裁剪不拆开工具调用与结果。
+ * 调用方应在上一轮结束后调用；函数不会修复已有的不完整消息，也不修改原数组。
  */
 export function trimHistory(
-  messages: ChatCompletionMessageParam[]
-): ChatCompletionMessageParam[] {
-  // system 是这轮对话的身份设定,永远保留
+  messages: HistoryMessage[]
+): HistoryMessage[] {
   const system = messages.filter((m) => m.role === 'system')
   const rest = messages.filter((m) => m.role !== 'system')
 
-  // user 消息是每一轮的起点,记下每个起点在 rest 里的下标
   const turnStarts: number[] = []
+
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i]?.role === 'user') turnStarts.push(i)
+    if (rest[i]?.startsTurn === true) turnStarts.push(i)
   }
 
-  // 轮数没超阈值,一条都不动(直接返回原数组,连拷贝都省了)
   if (turnStarts.length <= KEEP_TURNS) return messages
 
-  // 丢掉最老的几轮。keepFrom 是"保留范围的起点":
-  // 从它开始的整段就是最近 KEEP_TURNS 轮,边界必然完整。
   const keepFrom = turnStarts[turnStarts.length - KEEP_TURNS]
-  if (keepFrom === undefined) return messages // noUncheckedIndexedAccess 兜底,实际走不到
+  if (keepFrom === undefined) return messages
 
   return [...system, ...rest.slice(keepFrom)]
 }
 
-/** 记录一次实打实的工具调用,供循环守卫检测 */
+/** 模型发起的函数调用请求；进入记录不代表工具已执行。 */
 export interface ToolCallLog {
-  /** 工具名,如 "read_file" */
+  /** 请求中的工具名，如 read_file。 */
   name: string
-  /** 参数原始 JSON 字符串 —— 逐字相同就是最强信号 */
+  /** 原始参数字符串，用于逐字比较；此时可能尚未通过 JSON 或 schema 校验。 */
   argsKey: string
 }
 
 /**
- * 循环守卫:最近 threshold 条工具调用是否全部"同名 + 同参"。
- *
- * 返回 null 表示无恙,否则返回要回填给模型的告警文本。
- * 纯函数、无副作用 —— 可以单独写最小自动化测试。
- *
- * 为什么参数用"逐字相同"(原始字符串),不做 JSON.parse 规范化:
- *   · 少一个能抛异常的环节;
- *   · 模型偶尔打乱 key 顺序时,"语义相同"的调用通常还能产出新信息,
- *     放它过去是有意为之,不是缺陷。
+ * 检测末尾 threshold 次请求是否工具名、参数字符串均相同。
+ * 返回 null 表示未触发，否则返回供模型调整行为的说明。
+ * 未做 JSON 规范化：只改变键顺序或空白的同义参数也会被视为不同请求。
  */
 export function detectRepeatedCall(
   recentCalls: ToolCallLog[],
@@ -78,10 +79,10 @@ export function detectRepeatedCall(
 ): string | null {
   if (recentCalls.length < threshold) return null
 
-  // 只看"最后连续的 threshold 条"——中间穿插过别的工具,就不算连续重复
+  // 只比较末尾连续请求，其他位置的重复不在本次检测范围内。
   const slice = recentCalls.slice(-threshold)
   const first = slice[0]
-  if (!first) return null // noUncheckedIndexedAccess 兜底,实际走不到
+  if (!first) return null
 
   const allSame = slice.every(
     (c) => c.name === first.name && c.argsKey === first.argsKey

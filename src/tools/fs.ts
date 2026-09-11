@@ -8,14 +8,12 @@ import type { Tool } from './types.js'
 const PREVIEW_LINES = 20
 
 /**
- * 单文件最大整读字节数。比这大就拒绝,避免把整个大文件读进内存。
- *
- * 简化策略:真要流式读大文件得换 fd + 流接口。
- * 现在只需挡住几百 MB 日志 / 构建产物这类"整读必然出事"的用法,
- * 并让模型明确知道是"太大读不了",而不是看到一串被截断的乱码。
+ * 默认整文件读取上限。offset / limit 只控制返回行数，底层仍一次读入整个文件。
+ * 读取前先检查文件大小，避免大文件占用过多内存。
  */
 export const MAX_READ_BYTES = 5 * 1024 * 1024
 
+/** 允许通过正数 MINI_AGENT_MAX_READ_MB 覆盖上限，无效配置使用默认值。 */
 function readLimit(): number {
   const v = Number(process.env.MINI_AGENT_MAX_READ_MB)
   if (!Number.isFinite(v) || v <= 0) return MAX_READ_BYTES
@@ -55,13 +53,13 @@ export const readFileTool: Tool<z.infer<typeof readParams>> = {
       }
 
       const all = await readFile(abs, 'utf8')
-      // 按行切开。结尾的换行符会多产出一个空串,先剥掉,否则行号会虚高 1
+      // 去掉末尾换行产生的额外空项，避免把它计为新的一行。
       const lines = all.split('\n')
       if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
 
       const total = lines.length
 
-      // offset 超出文件末尾:这一页是空的,明确告诉模型"没有了",别让它空等
+      // 明确报告分页已越过文件末尾，供模型停止翻页。
       if (offset > total) {
         return `[文件 ${path} 共 ${total} 行，第 ${offset} 行已超出范围，没有更多内容]`
       }
@@ -90,6 +88,7 @@ const writeParams = z.object({
     .describe('要写入的完整文件内容。这是完整覆盖而不是追加,所以必须给出文件的全部内容。'),
 })
 
+/** 完整覆盖指定文件；路径可在项目外，批准预览需展示绝对路径和覆盖影响。 */
 export const writeFileTool: Tool<z.infer<typeof writeParams>> = {
   name: 'write_file',
   description:
