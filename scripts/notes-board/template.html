@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="查看项目运行流程、当前开发重点与设计依据。">
+  <title><!-- BOARD:TITLE --> · 项目地图</title>
+  <style><!-- BOARD:CSS --></style>
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5v15M3 4c4-1 6 0 9 2 3-2 5-3 9-2v15c-4-1-6 0-9 2-3-2-5-3-9-2Z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 7v10M18 7c0 6-12 4-12 10"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 9h18"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 10a8 8 0 0 0-14-4L3 9m0-6v6h6M4 14a8 8 0 0 0 14 4l3-3m0 6v-6h-6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 12H4m6-6-6 6 6 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 13 4-4m-5 7-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 1 2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(1 -1)"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3h7v7m0-7L10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="6" rx="1.5"/><rect x="14" y="15" width="7" height="6" rx="1.5"/><path d="M10 6h7a2 2 0 0 1 2 2v7M14 18H7a2 2 0 0 1-2-2V9m11 3 3 3 3-3"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4"/></symbol>
+    <symbol id="i-learn" viewBox="0 0 24 24"><path d="m2 8 10-5 10 5-10 5-10-5Zm4 3v7c4 3 8 3 12 0v-7m4-3v8"/></symbol>
+  </svg>
+  <a class="skip-link" href="#main-scroll">跳到内容</a>
+  <div class="workspace">
+    <header class="topbar">
+      <a class="topbar-brand" href="#overview" data-view="overview"><span class="brand-mark"><svg class="icon"><use href="#i-flow"/></svg></span><strong id="topbar-project-name"><!-- BOARD:TITLE --></strong></a>
+      <nav class="workspace-tabs" aria-label="项目导航"><a href="#overview" data-view="overview">项目地图</a><a href="#library" data-view="library">决策资料</a><a href="#timeline" data-view="timeline">演进记录</a><a href="#alternatives" data-view="alternatives">方案取舍</a></nav>
+      <label class="search-box" for="search-input"><svg class="icon"><use href="#i-search"/></svg><input id="search-input" type="search" placeholder="搜索决策或关键词" autocomplete="off" aria-label="搜索决策全文"><kbd>/</kbd></label>
+      <div class="connection-controls">
+        <span class="connection-status"><span id="sync-dot" class="status-dot" aria-hidden="true"></span><span id="source-status" role="status">未连接</span></span>
+        <button id="connect-button" class="button" title="连接项目目录" aria-label="连接项目目录"><svg class="icon"><use href="#i-folder"/></svg><span>连接目录</span></button>
+        <button id="refresh-button" class="icon-button" title="检查更新" aria-label="检查更新" disabled hidden><svg class="icon"><use href="#i-refresh"/></svg></button>
+      </div>
+    </header>
+    <main id="main-scroll" class="main-scroll" tabindex="-1">
+      <div class="page-content">
+        <h1 id="page-title" class="sr-only" tabindex="-1">项目地图</h1>
+        <div id="notice" class="notice" role="status" hidden></div>
+        <section id="onboarding" class="onboarding" hidden>
+          <div class="onboarding-art" aria-hidden="true"><svg viewBox="0 0 180 150" fill="none"><rect x="38" y="20" width="112" height="114" rx="8" fill="#f0f5f2" transform="rotate(8 38 20)"/><rect x="29" y="16" width="112" height="114" rx="8" fill="white" stroke="#cbdad2"/><path d="M50 45h35M50 61h69M50 75h61M50 89h68M50 103h44" stroke="#b7c9bf" stroke-width="4" stroke-linecap="round"/><rect x="105" y="92" width="40" height="40" rx="12" fill="#26735c"/><path d="m116 111 6 6 12-13" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h2 id="onboarding-title">尚未连接目录</h2>
+          <p id="onboarding-description">选择项目根目录或 .agents。</p>
+          <button class="button button-primary" data-connect><svg class="icon"><use href="#i-folder"/></svg>连接项目目录</button>
+          <a class="text-link snapshot-link" href="board.snapshot.html">离线快照 <span aria-hidden="true">↗</span></a>
+        </section>
+        <section id="overview-view" class="view" hidden>
+          <div id="project-overview" hidden>
+            <div id="project-brief" class="project-brief"></div>
+            <section id="map-surface" class="map-surface" aria-labelledby="map-title">
+              <header class="map-heading"><h2 id="map-title"></h2></header>
+              <div id="project-map"></div>
+              <section id="map-detail" class="map-detail" aria-labelledby="map-detail-title" hidden></section>
+            </section>
+            <div id="project-focus" class="project-focus"></div>
+            <section id="learning-panel" class="learning-panel" hidden><button id="learning-toggle" class="learning-toggle" aria-expanded="false" aria-controls="learning-content"><span class="learning-title"><svg class="icon"><use href="#i-learn"/></svg><strong id="learning-title">学习记录</strong></span><svg class="icon"><use href="#i-chevron"/></svg></button><div id="learning-content" class="learning-content" hidden></div></section>
+          </div>
+          <div id="overview-summary" class="overview-summary"></div>
+          <div id="module-grid" class="module-grid"></div>
+        </section>
+        <section id="collection-view" class="view" hidden>
+          <div class="collection-toolbar">
+            <div class="filter-controls"><label><span class="sr-only">按模块筛选</span><select id="group-filter"><option value="">全部模块</option></select></label><label><span class="sr-only">按状态筛选</span><select id="status-filter"><option value="">全部状态</option><option value="implemented">已落地</option><option value="proposed">待评审</option><option value="rejected">已否决</option><option value="archived">已归档</option></select></label><label><span class="sr-only">按类别筛选</span><select id="class-filter"><option value="">全部类别</option></select></label><button id="reset-filters" class="text-button" hidden>清除筛选</button></div>
+            <div class="collection-options"><span id="results-summary" class="results-summary" aria-live="polite"></span><label class="sort-control"><span class="sr-only">排序方式</span><select id="sort-select"><option value="new">日期 · 新到旧</option><option value="old">日期 · 旧到新</option><option value="references">引用 · 多到少</option></select></label></div>
+          </div>
+          <div id="month-filters" class="month-filters" aria-label="按月份筛选" hidden></div>
+          <div id="collection-content"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <dialog id="reader-dialog" class="reader-dialog" aria-labelledby="reader-title">
+    <div class="reader-toolbar">
+      <button id="reader-back" class="text-button" hidden><svg class="icon"><use href="#i-back"/></svg>返回上一份资料</button>
+      <button id="reader-close" class="icon-button" aria-label="关闭阅读" title="关闭阅读（Esc）"><svg class="icon"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="reader-scroll" class="reader-scroll" tabindex="-1">
+      <div id="reader-notice" class="notice" role="status" hidden></div>
+      <article id="reader-content" class="reader-content"></article>
+      <div id="reader-related" class="reader-related"></div>
+    </div>
+  </dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script><!-- BOARD:DATA --></script>
+  <script>
+  (() => {
+  'use strict';
+  <!-- BOARD:SCRIPT -->
+  })();
+  </script>
+</body>
+</html>

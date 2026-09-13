@@ -118,7 +118,15 @@ mini-agent 已启动。输入 exit 退出。
 ```bash
 npm run typecheck   # 类型检查
 npm test            # 运行单元测试(node:test)
+npm run verify-notes # 校验开发决策笔记
+npm run board        # 生成可连接本地项目的看板
+npm run board:bundle # 生成含地图、进度与笔记的离线快照
+npm run test:board   # 检查地图配置、资料读取与稳定同步
 ```
+
+本项目采用 AI 教练协作方式，入口见 [AGENTS.md](AGENTS.md)。通用的教练 Skill 与原版决策笔记 Skill 分开维护，项目背景和当前阶段保存在 [.agents/learning/](.agents/learning/)。使用、上游版本和迁移方式见 [开发协作说明](.agents/README.md)。
+
+打开 [board.html](board.html)，通过顶部导航查看项目地图、决策资料、演进记录和方案取舍。首页流程图占据完整内容宽度，点击环节就地展开实现、限制和决策依据，再次点击收起；完整笔记在居中阅读层打开，关闭后回到原来的筛选、节点和阅读位置。当前实现、下一步候选与可选学习区域读取现有进度记录。连接项目根目录或 `.agents` 后，地图配置、进度和笔记一起自动同步。项目内容由可选的 [.agents/board.json](.agents/board.json) 配置；直接浏览完整打包内容可用 [board.snapshot.html](board.snapshot.html)。
 
 ## 🗺️ 项目结构
 

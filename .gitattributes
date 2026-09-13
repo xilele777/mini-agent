@@ -1,0 +1,13 @@
+# Upstream note validation expects LF-delimited headers.
+/AGENTS.md text eol=lf
+/.agents/README.md text eol=lf
+/.agents/learning/*.md text eol=lf
+/.agents/notes/**/*.md text eol=lf
+/.agents/skills/learning-coach/** text eol=lf
+/scripts/build-notes-board.mjs text eol=lf
+/scripts/notes-board/** text eol=lf
+/board.html text eol=lf
+/board.snapshot.html text eol=lf
+
+# Preserve the pinned upstream snapshot without line-ending conversion.
+/.agents/skills/write-notes-like-deepseek/** -text

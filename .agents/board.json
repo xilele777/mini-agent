@@ -1,0 +1,161 @@
+{
+  "name": "mini-agent",
+  "map": {
+    "title": "运行流程",
+    "defaultNode": "model",
+    "flow": ["input", "model", "tools", "result"],
+    "loop": { "from": "result", "to": "model", "label": "继续调用模型" },
+    "supports": [
+      { "id": "context", "target": "model", "label": "提供对话历史" },
+      { "id": "todos", "target": "tools", "label": "工具按需读写" }
+    ],
+    "branches": {
+      "from": "tools",
+      "title": "控制工具",
+      "items": [
+        { "id": "ask", "returnsTo": "result", "label": "回答回填后，继续本轮" },
+        { "id": "finish", "returnsTo": "input", "label": "结束本轮，等待新指令" },
+        { "id": "pause", "returnsTo": "input", "label": "结束本轮，等待新指令" }
+      ]
+    },
+    "nodes": [
+      {
+        "id": "input", "title": "用户输入", "caption": "新指令开启一轮",
+        "behavior": ["先裁剪旧历史，再把新输入加入对话，标记为真实用户轮。", "一轮完成或暂停后，终端继续等待你的下一条指令。"],
+        "boundary": "执行中的提问和系统内部的继续提示，仍属于原来这一轮。",
+        "notes": ["implemented/architecture/2026-09-11-user-turn-boundaries.md", "implemented/architecture/2026-09-02-shared-terminal-input.md"],
+        "sources": [{ "label": "agent.ts · main", "path": "../src/agent.ts" }, { "label": "ui.ts · ask", "path": "../src/ui.ts" }]
+      },
+      {
+        "id": "model", "title": "模型调用", "caption": "读取上下文，选择动作",
+        "behavior": ["把对话历史和工具说明一起发给模型，使用原生 Function Calling 接收动作。", "只有文字回复时，追加继续提示，引导它执行、提问、完成或暂停。"],
+        "boundary": "模型可能判断错误。每个真实用户轮最多请求十次模型，重复调用另有守卫。",
+        "notes": ["implemented/architecture/2026-08-31-native-function-calling.md", "implemented/feature/2026-09-05-loop-guard-and-request-budget.md", "implemented/simplification/2026-08-31-remove-handwritten-react-parser.md"],
+        "sources": [{ "label": "agent.ts · runTurn", "path": "../src/agent.ts" }, { "label": "llm.ts · 模型连接", "path": "../src/llm.ts" }]
+      },
+      {
+        "id": "tools", "title": "工具执行", "caption": "校验 → 按需批准 → 执行",
+        "behavior": ["注册表查找工具并校验参数；需要批准的动作在你同意后才执行。", "读文件先定位再分页；写文件与命令分别按具体动作请求批准。"],
+        "boundary": "拒绝会作为结果交回模型，不会自动结束本轮；shell 的人工批准也不等于沙箱隔离。",
+        "notes": ["implemented/architecture/2026-08-31-tool-registry-boundary.md", "implemented/feature/2026-09-02-action-approval-scope.md", "implemented/feature/2026-09-05-bounded-file-retrieval.md", "implemented/bug-fix/2026-09-06-shared-read-guards.md", "implemented/bug-fix/2026-09-06-shell-interruption-reporting.md"],
+        "sources": [{ "label": "agent.ts · handleCall", "path": "../src/agent.ts" }, { "label": "tools/index.ts · 注册表", "path": "../src/tools/index.ts" }, { "label": "approval.ts · 批准", "path": "../src/approval.ts" }]
+      },
+      {
+        "id": "result", "title": "结果回填", "caption": "成功、拒绝、错误都回填",
+        "behavior": ["每次工具调用都配上相同 ID 的结果；过长的结果先截断，再写入历史。", "提前结束时，同批剩余调用补上“未执行”；异常时回滚本轮对话消息。"],
+        "boundary": "回滚消息不会撤销已经发生的文件写入、命令执行或待办变更。",
+        "notes": ["implemented/bug-fix/2026-09-06-tool-result-history-recovery.md", "implemented/architecture/2026-09-05-bounded-conversation-context.md"],
+        "sources": [{ "label": "agent.ts · 结果回填", "path": "../src/agent.ts" }, { "label": "context.ts · truncateToolResult", "path": "../src/context.ts" }]
+      },
+      {
+        "id": "context", "title": "对话上下文", "caption": "按完整用户轮保留历史",
+        "behavior": ["新请求前按真实用户轮裁剪旧历史；内部继续提示不会被误算成新的一轮。", "发送给模型时去掉本地的轮次标记，保留标准消息结构。"],
+        "boundary": "固定轮数不能保证固定 token 上限；对话消息也不会跨进程恢复。",
+        "notes": ["implemented/architecture/2026-09-05-bounded-conversation-context.md", "implemented/architecture/2026-09-11-user-turn-boundaries.md"],
+        "sources": [{ "label": "context.ts · trimHistory", "path": "../src/context.ts" }]
+      },
+      {
+        "id": "todos", "title": "待办计划", "caption": "JSON 保存，启动时恢复",
+        "behavior": ["由 todo 模块维护运行中的状态，修改后写入项目内的 JSON 文件。", "启动时通过注册表恢复清单，再开始接收用户请求。"],
+        "boundary": "清单只保存计划；暂停状态、任务归属和多进程写入协调尚未实现。",
+        "notes": ["implemented/architecture/2026-09-06-todo-json-persistence.md", "implemented/architecture/2026-09-10-todo-state-ownership.md"],
+        "sources": [{ "label": "tools/todo.ts · 待办状态", "path": "../src/tools/todo.ts" }]
+      },
+      {
+        "id": "ask", "title": "提问", "caption": "缺少必要信息",
+        "behavior": ["使用同一个终端输入实例等待回答，回答作为工具结果交回模型。", "回答仍属于发起询问的这一轮，之后模型可以继续调用工具。"],
+        "boundary": "提问本身不会结束这一轮；回答“不”之后是否暂停，仍由模型选择控制工具。",
+        "notes": ["implemented/feature/2026-09-11-explicit-turn-exits.md", "implemented/architecture/2026-09-02-shared-terminal-input.md"],
+        "sources": [{ "label": "tools/control.ts · ask_user", "path": "../src/tools/control.ts" }]
+      },
+      {
+        "id": "finish", "title": "完成", "caption": "本次请求已完成",
+        "behavior": ["工具带有结束标记；结果回填后，主循环停止本轮的后续执行。", "是否完成以本次请求为准；“只记录待办”不要求把清单里的任务全部执行。"],
+        "boundary": "完成的判断依赖模型；结束这一轮后，程序仍等待新的输入。",
+        "notes": ["implemented/feature/2026-09-11-explicit-turn-exits.md", "implemented/bug-fix/2026-09-06-tool-result-history-recovery.md"],
+        "sources": [{ "label": "tools/control.ts · finish_task", "path": "../src/tools/control.ts" }]
+      },
+      {
+        "id": "pause", "title": "暂停", "caption": "尚未完成",
+        "behavior": ["pause_task 通过结束标记停止本轮，等待你给出新的指令。", "提示词要求旧任务在明确恢复后继续，暂停不会自动删除待办。"],
+        "boundary": "暂停原因只保留在对话中；当前没有持久化的暂停状态或任务隔离。",
+        "notes": ["implemented/feature/2026-09-11-explicit-turn-exits.md", "implemented/architecture/2026-09-06-todo-json-persistence.md"],
+        "sources": [{ "label": "tools/control.ts · pause_task", "path": "../src/tools/control.ts" }]
+      }
+    ]
+  },
+  "brief": {
+    "source": "learning/progress.md",
+    "current": "当前阶段",
+    "next": "下一次学习入口",
+    "attention": "待验证项"
+  },
+  "learning": {
+    "enabled": true,
+    "title": "学习记录",
+    "source": "learning/progress.md",
+    "sections": [
+      { "title": "实践记录", "heading": "已有验证证据" },
+      { "title": "理解证据", "heading": "理解证据" },
+      { "title": "下一次练习", "heading": "下一次学习入口" }
+    ]
+  },
+  "groups": [
+    {
+      "id": "model-tools",
+      "title": "模型与工具协议",
+      "notes": [
+        { "id": "implemented/architecture/2026-08-30-local-cli-and-sdk.md", "label": "本地 CLI，直接调用模型" },
+        { "id": "implemented/architecture/2026-08-31-native-function-calling.md", "label": "使用原生 Function Calling" },
+        { "id": "implemented/architecture/2026-08-31-tool-registry-boundary.md", "label": "用注册表统一管理工具" },
+        { "id": "implemented/simplification/2026-08-31-remove-handwritten-react-parser.md", "label": "移除旧 ReAct 解析器" }
+      ]
+    },
+    {
+      "id": "execution",
+      "title": "执行流程与出口",
+      "notes": [
+        { "id": "implemented/architecture/2026-09-02-shared-terminal-input.md", "label": "共用一个终端输入实例" },
+        { "id": "implemented/feature/2026-09-05-loop-guard-and-request-budget.md", "label": "防止重复调用与失控循环" },
+        { "id": "implemented/feature/2026-09-11-explicit-turn-exits.md", "label": "区分完成、暂停和提问" },
+        { "id": "implemented/bug-fix/2026-09-06-tool-result-history-recovery.md", "label": "提前退出也补齐工具结果" }
+      ]
+    },
+    {
+      "id": "files-permissions",
+      "title": "文件操作与权限",
+      "notes": [
+        { "id": "implemented/feature/2026-09-05-bounded-file-retrieval.md", "label": "先搜索定位，再分页读取" },
+        { "id": "implemented/feature/2026-09-02-action-approval-scope.md", "label": "按具体动作请求批准" },
+        { "id": "implemented/bug-fix/2026-09-06-shared-read-guards.md", "label": "读取与搜索共用路径检查" },
+        { "id": "implemented/bug-fix/2026-09-06-shell-interruption-reporting.md", "label": "单独报告命令中断与副作用" }
+      ]
+    },
+    {
+      "id": "context",
+      "title": "上下文与消息",
+      "notes": [
+        { "id": "implemented/architecture/2026-09-05-bounded-conversation-context.md", "label": "截断工具结果，按整轮裁剪" },
+        { "id": "implemented/architecture/2026-09-11-user-turn-boundaries.md", "label": "区分用户输入与内部提示" }
+      ]
+    },
+    {
+      "id": "todos",
+      "title": "待办与持久化",
+      "notes": [
+        { "id": "implemented/architecture/2026-09-06-todo-json-persistence.md", "label": "用 JSON 保存待办计划" },
+        { "id": "implemented/architecture/2026-09-10-todo-state-ownership.md", "label": "模块管理状态，启动时恢复" }
+      ]
+    },
+    {
+      "id": "workflow",
+      "title": "开发协作与验证",
+      "notes": [
+        { "id": "implemented/process/2026-09-11-learning-workflow-and-notes.md", "label": "分开维护教练方法与项目资料" },
+        { "id": "implemented/testing/2026-09-05-verification-scope.md", "label": "明确测试的覆盖范围" },
+        { "id": "implemented/process/2026-09-11-complete-board-sections.md", "label": "完整保留决策与验证依据" },
+        { "id": "implemented/process/2026-09-12-readable-board-and-stable-sync.md", "label": "独立维护看板，按变化同步" }
+      ]
+    }
+  ]
+}

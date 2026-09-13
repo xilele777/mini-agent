@@ -28,7 +28,11 @@
   "scripts": {
     "dev": "tsx src/agent.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/context.test.ts src/guard.test.ts src/tools/fs.test.ts"
+    "test": "tsx --test src/context.test.ts src/guard.test.ts src/tools/fs.test.ts",
+    "verify-notes": "tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts && tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts",
+    "board": "node scripts/build-notes-board.mjs --live",
+    "board:bundle": "node scripts/build-notes-board.mjs --bundle",
+    "test:board": "node --test scripts/notes-board/model.test.mjs scripts/notes-board/project.test.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
