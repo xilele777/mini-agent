@@ -1,3 +1,4 @@
+import { collectResponse } from './stream.js'
 import { client, MODEL } from './llm.js'
 import { getToolSchemas, prepareCall, executeCall, initTools } from './tools/index.js'
 import { requestApproval } from './approval.js'
@@ -101,13 +102,28 @@ async function runTurn(messages: HistoryMessage[]): Promise<void> {
   let loopHits = 0
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const response = await client.chat.completions.create({
+    const stream = await client.chat.completions.create({
       model: MODEL,
       messages: toModelMessages(messages),
       tools: getToolSchemas(),
+      stream: true,
+      stream_options: { include_usage: true },
     })
 
-    const usage = response.usage
+    let wroteText = false
+    const { message, usage } = await (async () => {
+      try {
+        return await collectResponse(stream, (text) => {
+          if (!wroteText) {
+            process.stdout.write('\nAgent: ')
+            wroteText = true
+          }
+          process.stdout.write(text)
+        })
+      } finally {
+        if (wroteText) process.stdout.write('\n')
+      }
+    })()
     if (usage) {
       console.log(
         `  [ctx] 本轮 prompt=${usage.prompt_tokens} completion=${usage.completion_tokens}` +
@@ -115,20 +131,15 @@ async function runTurn(messages: HistoryMessage[]): Promise<void> {
       )
     }
 
-    const message = response.choices[0]?.message
-    if (!message) throw new Error('模型没有返回 message')
-
     messages.push(message)
 
     const toolCalls = message.tool_calls
     if (!toolCalls || toolCalls.length === 0) {
-      console.log(`\nAgent: ${message.content ?? '(空回复)'}`)
+      if (!wroteText) console.log('\nAgent: (空回复)')
       // 引导模型使用显式出口；内部提示属于当前轮，因此不添加 startsTurn 标记。
       messages.push({ role: 'user', content: CONTINUE_NUDGE })
       continue
     }
-
-    if (message.content) console.log(`\nAgent: ${message.content}`)
 
     for (const call of toolCalls) {
       const isFunction = call.type === 'function'
