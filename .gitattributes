@@ -1,3 +1,6 @@
+# Treat project collaboration files as documentation in GitHub language statistics.
+/.agents/** linguist-documentation
+
 # Upstream note validation expects LF-delimited headers.
 /AGENTS.md text eol=lf
 /.agents/README.md text eol=lf
