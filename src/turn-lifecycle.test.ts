@@ -14,6 +14,7 @@ import {
   type RunTurnOptions,
   type TurnEvent,
 } from './turn.js'
+import { testConfig } from './test-runtime.js'
 
 function tool(
   name: string,
@@ -75,6 +76,7 @@ function setup(tools: Tool[], batches: string[][]) {
   const options: RunTurnOptions = {
     registry: createToolRegistry([...tools, done, pause]),
     maxIterations: 6,
+    contextBudget: testConfig.contextBudget,
     createStream: async () => {
       const batch = batches[requests++]
       if (!batch) throw new Error('模拟模型请求失败')

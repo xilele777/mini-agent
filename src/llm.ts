@@ -6,11 +6,13 @@ import type {
   ChatCompletionToolChoiceOption,
 } from 'openai/resources/chat/completions'
 import type { AppConfig } from './config.js'
+import { ContextBudgetError } from './context-budget.js'
 
 export interface ModelRequest {
   messages: ChatCompletionMessageParam[]
   tools: ChatCompletionFunctionTool[]
   tool_choice?: ChatCompletionToolChoiceOption
+  maxOutputTokens?: number
 }
 
 export class ModelTimeoutError extends Error {
@@ -35,6 +37,19 @@ export function createModelStream(
   async function* stream(
     request: ModelRequest
   ): AsyncGenerator<ChatCompletionChunk> {
+    const outputLimit =
+      request.maxOutputTokens ?? config.contextBudget.outputReserve
+
+    if (
+      !Number.isSafeInteger(outputLimit) ||
+      outputLimit <= 0 ||
+      outputLimit > config.contextBudget.outputReserve
+    ) {
+      throw new Error(
+        '生成上限必须是正整数，且不能超过配置的输出预留'
+      )
+    }
+
     // 覆盖整个流的生命周期，不只等待响应头。
     const controller = new AbortController()
     const timer = setTimeout(
@@ -45,6 +60,9 @@ export function createModelStream(
     try {
       const response = await client.chat.completions.create({
         model: config.model,
+        ...(config.outputTokenParam === 'max_tokens'
+          ? { max_tokens: outputLimit }
+          : { max_completion_tokens: outputLimit }),
         messages: request.messages,
         ...(request.tools.length > 0
           ? { tools: request.tools }
@@ -67,6 +85,19 @@ export function createModelStream(
       if (controller.signal.aborted) {
         throw new ModelTimeoutError()
       }
+
+      if (
+        error instanceof OpenAI.APIError &&
+        (
+          error.code === 'context_length_exceeded' ||
+          error.code === 'context_window_exceeded'
+        )
+      ) {
+        throw new ContextBudgetError(
+          '服务端拒绝了上下文长度；请降低窗口配置或缩小任务后再试。'
+        )
+      }
+
       throw error
     } finally {
       clearTimeout(timer)

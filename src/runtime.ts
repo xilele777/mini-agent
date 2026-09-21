@@ -27,6 +27,7 @@ export function createRuntime(
 
   const subagentOptions: RunSubAgentOptions = {
     createStream,
+    contextBudget: config.contextBudget,
     maxIterations: config.subagentMaxIterations,
     registry: createToolRegistry([
       readFile,
@@ -52,6 +53,7 @@ export function createRuntime(
 
   const turnOptions: RunTurnOptions = {
     createStream,
+    contextBudget: config.contextBudget,
     registry,
     maxIterations: config.maxIterations,
   }

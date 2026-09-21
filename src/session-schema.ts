@@ -1,4 +1,7 @@
 import { z } from 'zod'
+import { historyFingerprint, summarySchema } from './context-summary.js'
+
+// Note: 版本 3 摘要与版本 2 无损读取 — 见 .agents/notes/implemented/architecture/2026-09-21-atomic-session-storage.md
 
 const id = z.uuid()
 const text = z.string().min(1)
@@ -64,12 +67,13 @@ const actionSchema = z.strictObject({
 })
 
 const dataSchema = z.strictObject({
-  version: z.literal(2),
+  version: z.literal(3),
   id,
   projectRoot: text,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   messages: z.array(messageSchema),
+  summary: summarySchema.nullable(),
   turns: z.array(z.strictObject({
     id,
     start: z.number().int().nonnegative(),
@@ -95,9 +99,21 @@ const dataSchema = z.strictObject({
 
 export type Session = z.infer<typeof dataSchema>
 
-export const sessionSchema = dataSchema.superRefine((s, ctx) => {
+const validatedSessionSchema = dataSchema.superRefine((s, ctx) => {
   const bad = (message: string) =>
     ctx.addIssue({ code: 'custom', message })
+
+  if (s.summary) {
+    const first = s.messages.findIndex((m) => m.role === 'user' && m.startsTurn)
+    const boundary = s.turns.findIndex((t) => t.start === s.summary!.through)
+    if (
+      first < 0 || s.summary.through <= first || boundary <= 0 ||
+      s.turns.slice(0, boundary).some((t) => t.status === 'running') ||
+      historyFingerprint(s.messages, s.summary.through) !== s.summary.sourceHash
+    ) {
+      bad('摘要范围或原文指纹无效')
+    }
+  }
 
   const ids = s.todo.tasks.map((task) => task.id)
   if (new Set(ids).size !== ids.length || ids.some((n) => n >= s.todo.nextId)) {
@@ -214,3 +230,15 @@ export const sessionSchema = dataSchema.superRefine((s, ctx) => {
     }
   }
 })
+
+// v2 有完整动作证据，可无损补空摘要；只读加载不回写，下一次原子保存写 v3。
+// v1 与未知版本继续拒绝，不能把缺失的动作记录猜成已完成。
+export const sessionSchema = z.preprocess((value) => {
+  if (
+    typeof value === 'object' && value !== null &&
+    'version' in value && value.version === 2 && !('summary' in value)
+  ) {
+    return { ...value, version: 3, summary: null }
+  }
+  return value
+}, validatedSessionSchema)

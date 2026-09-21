@@ -9,7 +9,15 @@ import {
   detectRepeatedCall,
   truncateToolResult,
 } from './context.js'
-import type { ToolCallLog } from './context.js'
+import type {
+  HistoryMessage,
+  ToolCallLog,
+} from './context.js'
+import {
+  buildContext,
+  ContextBudgetError,
+  type ContextBudget,
+} from './context-budget.js'
 import {
   executeCall,
   type ToolRegistry,
@@ -39,6 +47,7 @@ const FINAL_NUDGE = [
 export interface SubAgentRequest {
   messages: ChatCompletionMessageParam[]
   tools: ChatCompletionFunctionTool[]
+  maxOutputTokens: number
 }
 
 export type CreateSubAgentStream = (
@@ -50,6 +59,7 @@ export interface RunSubAgentOptions {
   registry: ToolRegistry
   maxIterations: number
   onProgress?: (message: string) => void
+  contextBudget: ContextBudget
 }
 
 function getFinalText(
@@ -94,7 +104,7 @@ export async function runSubAgent(
   const report =
     options.onProgress ?? (() => undefined)
 
-  const messages: ChatCompletionMessageParam[] = [
+  const messages: HistoryMessage[] = [
     {
       role: 'system',
       content: SUBAGENT_SYSTEM_PROMPT,
@@ -102,6 +112,7 @@ export async function runSubAgent(
     {
       role: 'user',
       content: normalizedTask,
+      startsTurn: true,
     },
   ]
 
@@ -132,19 +143,45 @@ export async function runSubAgent(
       (isFinalRequest ? '（最终总结）' : '')
     )
 
-    const stream = await createStream({
-      messages: [...messages],
+    const tools = isFinalRequest
+      ? []
+      : options.registry.getToolSchemas()
 
-      tools: isFinalRequest
-        ? []
-        : options.registry.getToolSchemas(),
-    })
+    const plan = buildContext(
+      messages,
+      tools,
+      options.contextBudget
+    )
 
-    const { message, usage } =
-      await collectResponse(
+    report(
+      `ctx estimated=${plan.estimatedInputTokens}/${plan.inputLimit}`
+    )
+
+    if (!plan.ok) {
+      return `[子 Agent 上下文预算耗尽] ${plan.reason}`
+    }
+
+    let response: Awaited<ReturnType<typeof collectResponse>>
+
+    try {
+      const stream = await createStream({
+        messages: plan.messages,
+        tools,
+        maxOutputTokens: options.contextBudget.outputReserve,
+      })
+
+      response = await collectResponse(
         stream,
         () => undefined
       )
+    } catch (error) {
+      if (error instanceof ContextBudgetError) {
+        return `[子 Agent 上下文预算耗尽] ${error.message}`
+      }
+      throw error
+    }
+
+    const { message, usage } = response
 
     if (usage) {
       report(
@@ -217,18 +254,16 @@ export async function runSubAgent(
               `错误:子 Agent 不能执行需要人工批准的工具 ` +
               `"${prepared.tool.name}"。`
           } else {
-            observation = truncateToolResult(
-              await executeCall(
-                prepared.tool,
-                prepared.args
-              )
+            observation = await executeCall(
+              prepared.tool,
+              prepared.args
             )
           }
         }
       }
 
       const firstLine =
-        observation.split('\n')[0] ?? ''
+        truncateToolResult(observation).split('\n')[0] ?? ''
       const more =
         observation.includes('\n') ? ' …' : ''
 

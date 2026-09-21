@@ -18,6 +18,7 @@ import { createTodoTools } from './tools/todo.js'
 import { createToolRegistry } from './tools/registry.js'
 import type { Tool } from './tools/types.js'
 import { CheckpointError, type RunTurnOptions } from './turn.js'
+import { testConfig } from './test-runtime.js'
 
 async function* response(
   names: string[]
@@ -65,6 +66,7 @@ function options(
   return {
     registry: createToolRegistry([...tools, done]),
     maxIterations: 3,
+    contextBudget: testConfig.contextBudget,
     createStream: async () => {
       const batch = batches[index++]
       if (!batch) throw new Error('缺少模拟响应')
@@ -179,7 +181,7 @@ if (process.argv[2] === '--crash') {
       const reopened = await openSession(root, id)
 
       try {
-        assert.equal(reopened.snapshot.version, 2)
+        assert.equal(reopened.snapshot.version, 3)
         assert.equal(reopened.snapshot.turns[0]?.status, 'completed')
         assert.deepEqual(
           reopened.snapshot.turns[0]?.actions.map((a) => a.state),
@@ -339,7 +341,7 @@ if (process.argv[2] === '--crash') {
     })
   })
 
-  test('模型只看最近轮，磁盘保留全部原始历史', async () => {
+  test('预算充足时保留超过六个旧轮，磁盘保留全部原始历史', async () => {
     await fixture(async (root) => {
       const session = await createSession(root)
       const counts: number[] = []
@@ -364,7 +366,7 @@ if (process.argv[2] === '--crash') {
           session.snapshot.messages.filter((m) => m.role === 'user').length,
           9
         )
-        assert.equal(counts.at(-1), 7)
+        assert.equal(counts.at(-1), 9)
       } finally {
         await session.close()
       }

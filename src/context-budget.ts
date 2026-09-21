@@ -9,12 +9,19 @@ import {
   type HistoryMessage,
 } from './context.js'
 
-// Note: 请求视图的预算与整轮裁剪 — 见 .agents/notes/proposed/architecture/2026-09-20-practical-mini-agent-v1.md
+// Note: 请求视图的预算与整轮裁剪 — 见 .agents/notes/implemented/architecture/2026-09-05-bounded-conversation-context.md
 
 export interface ContextBudget {
   contextWindow: number
   outputReserve: number
   safetyMargin: number
+}
+
+export class ContextBudgetError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ContextBudgetError'
+  }
 }
 
 export type ContextPlan = {

@@ -6,8 +6,6 @@ import type {
 import { requestApproval } from './approval.js'
 import {
   detectRepeatedCall,
-  toModelMessages,
-  trimHistory,
   truncateToolResult,
 } from './context.js'
 import type {
@@ -16,6 +14,12 @@ import type {
 } from './context.js'
 import { collectResponse } from './stream.js'
 import type { ToolRegistry } from './tools/registry.js'
+import {
+  buildContext,
+  ContextBudgetError,
+  type ContextBudget,
+  type ContextPlan,
+} from './context-budget.js'
 
 // Note: 主轮与 REPL 分离，以模拟流测试生命周期控制 — 见 .agents/notes/implemented/architecture/2026-09-20-testable-turn-runner.md
 
@@ -48,14 +52,10 @@ const REJECTED =
   '用户拒绝了这次操作。不要重试，也不要换一种方式绕过。' +
   '如果因此无法继续当前任务，调用 pause_task 说明原因，等待用户新指令。'
 
-/**
- * runTurn 发起一次模型请求时需要的数据。
- *
- * 测试可以检查每次请求实际收到的历史和工具集合。
- */
 export interface TurnRequest {
   messages: ChatCompletionMessageParam[]
   tools: ChatCompletionFunctionTool[]
+  maxOutputTokens: number
 }
 
 /**
@@ -66,6 +66,12 @@ export interface TurnRequest {
 export type CreateTurnStream = (
   request: TurnRequest
 ) => Promise<AsyncIterable<ChatCompletionChunk>>
+
+export type PrepareContext = (
+  history: HistoryMessage[],
+  tools: ChatCompletionFunctionTool[],
+  requests: { createStream: CreateTurnStream; remaining: number }
+) => Promise<ContextPlan>
 
 export type TurnStatus =
   | 'completed'
@@ -104,6 +110,8 @@ export interface RunTurnOptions {
     event: TurnEvent,
     messages: HistoryMessage[]
   ) => Promise<void>
+  contextBudget: ContextBudget
+  prepareContext?: PrepareContext
 }
 
 /** 保存失败必须终止，不能当成普通工具错误让模型继续。 */
@@ -126,26 +134,6 @@ function isAbortError(error: unknown): boolean {
 type PendingCall = {
   messageIndex: number
   call: FunctionCall
-}
-
-function modelMessages(
-  messages: HistoryMessage[]
-): ChatCompletionMessageParam[] {
-  const start = messages.findLastIndex((m) => m.startsTurn === true)
-
-  const view = start < 0 ? messages : [
-    ...trimHistory(messages.slice(0, start)),
-    ...messages.slice(start),
-  ]
-
-  return toModelMessages(view).map((message) =>
-    message.role === 'tool' && typeof message.content === 'string'
-      ? {
-          ...message,
-          content: truncateToolResult(message.content),
-        }
-      : message
-  )
 }
 
 export async function runTurn(
@@ -171,6 +159,16 @@ export async function runTurn(
   let loopHits = 0
   let pending: PendingCall[] = []
   let active: PendingCall | undefined
+  let requestCount = 0
+
+  const createStream: CreateTurnStream = async (request) => {
+    if (requestCount >= options.maxIterations) {
+      throw new ContextBudgetError('主轮与摘要的模型请求次数预算已耗尽')
+    }
+    // 在真正开始请求前扣次数；传输失败也消耗本次额度。
+    requestCount++
+    return options.createStream(request)
+  }
 
   async function emit(event: TurnEvent): Promise<void> {
     if (!options.checkpoint) return
@@ -225,14 +223,28 @@ export async function runTurn(
   try {
     await emit({ type: 'messages' })
 
-    for (
-      let iteration = 0;
-      iteration < options.maxIterations;
-      iteration++
-    ) {
-      const stream = await options.createStream({
-        messages: modelMessages(messages),
-        tools: options.registry.getToolSchemas(),
+    while (requestCount < options.maxIterations) {
+      const tools = options.registry.getToolSchemas()
+      const plan = options.prepareContext
+        ? await options.prepareContext(messages, tools, {
+            createStream,
+            remaining: options.maxIterations - requestCount,
+          })
+        : buildContext(messages, tools, options.contextBudget)
+
+      log(
+        `  [ctx] estimated=${plan.estimatedInputTokens}/${plan.inputLimit}` +
+        ` droppedTurns=${plan.droppedTurns}`
+      )
+
+      if (!plan.ok) {
+        return await finish('budget_exhausted', plan.reason)
+      }
+
+      const stream = await createStream({
+        messages: plan.messages,
+        tools,
+        maxOutputTokens: options.contextBudget.outputReserve,
       })
 
       let wroteText = false
@@ -381,7 +393,9 @@ export async function runTurn(
     const cancelled = isAbortError(error)
     const reason = cancelled
       ? '本轮已取消。'
-      : `本轮失败：${String(error)}`
+      : error instanceof ContextBudgetError
+        ? error.message
+        : `本轮失败：${String(error)}`
 
     if (active) {
       await record(
@@ -397,7 +411,11 @@ export async function runTurn(
     )
 
     return await finish(
-      cancelled ? 'cancelled' : 'failed',
+      cancelled
+        ? 'cancelled'
+        : error instanceof ContextBudgetError
+          ? 'budget_exhausted'
+          : 'failed',
       reason
     )
   }

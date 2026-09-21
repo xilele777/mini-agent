@@ -103,12 +103,13 @@ export async function createSession(
   try {
     const now = new Date().toISOString()
     const state: Session = {
-      version: 2,
+      version: 3,
       id,
       projectRoot,
       createdAt: now,
       updatedAt: now,
       messages: [],
+      summary: null,
       turns: [],
       todo: { tasks: [], nextId: 1 },
     }

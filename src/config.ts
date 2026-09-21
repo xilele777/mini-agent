@@ -54,6 +54,15 @@ export function loadConfig(env: Env, platform: NodeJS.Platform) {
     MINI_AGENT_MAX_ITERATIONS: positiveInt.default(10),
     MINI_AGENT_SUBAGENT_MAX_ITERATIONS: positiveInt.default(6),
 
+    MINI_AGENT_CONTEXT_WINDOW: positiveInt.default(32_768),
+    MINI_AGENT_OUTPUT_RESERVE: positiveInt.default(4096),
+    MINI_AGENT_CONTEXT_MARGIN: z.coerce.number()
+      .int().nonnegative().default(1024),
+    MINI_AGENT_OUTPUT_TOKEN_PARAM: z.enum([
+      'max_completion_tokens',
+      'max_tokens',
+    ]).default('max_completion_tokens'),
+
     MINI_AGENT_MAX_READ_MB: z.coerce.number().positive()
       .max(Number.MAX_SAFE_INTEGER / 1024 / 1024).default(5),
   })
@@ -71,6 +80,18 @@ export function loadConfig(env: Env, platform: NodeJS.Platform) {
 
   const c = result.data
 
+  if (
+    c.MINI_AGENT_OUTPUT_RESERVE >= c.MINI_AGENT_CONTEXT_WINDOW ||
+    c.MINI_AGENT_CONTEXT_MARGIN >=
+      c.MINI_AGENT_CONTEXT_WINDOW - c.MINI_AGENT_OUTPUT_RESERVE
+  ) {
+    throw new ConfigError([
+      'MINI_AGENT_CONTEXT_WINDOW',
+      'MINI_AGENT_OUTPUT_RESERVE',
+      'MINI_AGENT_CONTEXT_MARGIN',
+    ])
+  }
+
   return Object.freeze({
     apiKey: c.OPENAI_API_KEY,
     baseURL: c.OPENAI_BASE_URL,
@@ -81,6 +102,12 @@ export function loadConfig(env: Env, platform: NodeJS.Platform) {
     maxIterations: c.MINI_AGENT_MAX_ITERATIONS,
     subagentMaxIterations: c.MINI_AGENT_SUBAGENT_MAX_ITERATIONS,
     maxReadBytes: c.MINI_AGENT_MAX_READ_MB * 1024 * 1024,
+    contextBudget: Object.freeze({
+      contextWindow: c.MINI_AGENT_CONTEXT_WINDOW,
+      outputReserve: c.MINI_AGENT_OUTPUT_RESERVE,
+      safetyMargin: c.MINI_AGENT_CONTEXT_MARGIN,
+    }),
+    outputTokenParam: c.MINI_AGENT_OUTPUT_TOKEN_PARAM,
   })
 }
 

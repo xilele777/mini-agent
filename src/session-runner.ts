@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { HistoryMessage } from './context.js'
 import { messageSchema, type Session } from './session-schema.js'
 import type { SessionHandle } from './session.js'
+import { createSessionContext } from './compaction.js'
 import {
   CheckpointError,
   runTurn,
@@ -87,7 +88,7 @@ function applyCheckpoint(
 export async function runSessionTurn(
   session: SessionHandle,
   input: string,
-  options: Omit<RunTurnOptions, 'checkpoint'>
+  options: Omit<RunTurnOptions, 'checkpoint' | 'prepareContext'>
 ) {
   if (!input.trim()) throw new Error('用户输入不能为空')
 
@@ -125,20 +126,9 @@ export async function runSessionTurn(
 
   return runTurn(messages, {
     ...options,
-    createStream: (request) => {
-      const unknown = session.snapshot.turns.some(
-        (t) => t.actions.some((a) => a.state === 'uncertain')
-      )
-
-      return options.createStream(unknown ? {
-        ...request,
-        messages: [{
-          role: 'system',
-          content:
-            '历史中有结果不确定的工具动作。继续相关任务前先只读核查外部状态；无法核查时保留不确定性，不得直接重试旧动作。',
-        }, ...request.messages],
-      } : request)
-    },
+    prepareContext: createSessionContext(
+      session, options.contextBudget, options.log ?? console.log
+    ),
     checkpoint: (event, history) =>
       save(session, (draft) =>
         applyCheckpoint(draft, turnId, event, history)
@@ -187,6 +177,10 @@ export function describeSession(session: SessionHandle): string {
     `会话：${state.id}`,
     `消息 ${state.messages.length} 条，待办 ${state.todo.tasks.length} 项。`,
   ]
+
+  if (state.summary) {
+    lines.push(`历史摘要覆盖到原始消息 ${state.summary.through}；完整历史仍保留。`)
+  }
 
   if (turn) {
     lines.push(`最近用户轮：${turn.id} / ${turn.status}；${turn.reason}`)
