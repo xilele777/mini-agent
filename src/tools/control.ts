@@ -30,9 +30,9 @@ export const askUserTool: Tool<z.infer<typeof askUserParams>> = {
   description:
     '执行中遇到只有用户才能拍板的决定时,停下来问用户。传入的问题会原样展示给用户,用户的回答会返回给你。',
   schema: askUserParams,
-  execute: async ({ question }) => {
+  execute: async ({ question }, context) => {
     console.log(`\n[询问用户] ${question}`)
-    const answer = (await ask('你的回答> ')).trim()
+    const answer = (await ask('你的回答> ', context?.signal)).trim()
     return `用户回答:${answer}`
   },
 }

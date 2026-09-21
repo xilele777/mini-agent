@@ -45,6 +45,7 @@ const FINAL_NUDGE = [
 
 
 export interface SubAgentRequest {
+  signal?: AbortSignal
   messages: ChatCompletionMessageParam[]
   tools: ChatCompletionFunctionTool[]
   maxOutputTokens: number
@@ -55,6 +56,7 @@ export type CreateSubAgentStream = (
 ) => Promise<AsyncIterable<ChatCompletionChunk>>
 
 export interface RunSubAgentOptions {
+  signal?: AbortSignal
   createStream: CreateSubAgentStream
   registry: ToolRegistry
   maxIterations: number
@@ -98,8 +100,10 @@ export async function runSubAgent(
     throw new Error('子 Agent 请求上限必须是正整数')
   }
 
-  const createStream =
-    options.createStream
+  const createStream: CreateSubAgentStream = request => {
+    options.signal?.throwIfAborted()
+    return options.createStream({ ...request, ...(options.signal ? { signal: options.signal } : {}) })
+  }
 
   const report =
     options.onProgress ?? (() => undefined)
@@ -216,6 +220,7 @@ export async function runSubAgent(
     }
 
     for (const call of toolCalls) {
+      options.signal?.throwIfAborted()
       let observation: string
       let toolName: string
 

@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
-import { guardDirRead, isBlocked, ROOT } from '../guard.js'
+import { guardDirRead, guardPathRead, isBlocked, ROOT } from '../guard.js'
 import type { Tool } from './types.js'
 
 /** 搜索时跳过的版本库、依赖和构建产物目录。 */
@@ -39,7 +39,7 @@ async function walk(dir: string, onFile: (file: string) => Promise<void>): Promi
   for (const entry of entries) {
     const full = join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) await walk(full, onFile)
+      if (!SKIP_DIRS.has(entry.name) && !isBlocked(full) && (await guardDirRead(full)).ok) await walk(full, onFile)
     } else if (entry.isFile()) {
       await onFile(full)
     }
@@ -86,7 +86,7 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
       if (done()) return
 
       // 与单文件读取共用敏感路径规则，避免通过搜索返回被拦截文件的内容。
-      if (isBlocked(file)) return
+      if (isBlocked(file) || !(await guardPathRead(file)).ok) return
 
       const relPath = relative(ROOT, file) // 返回相对路径，便于后续定位与分段读取。
       if (fileFilter && !fileFilter.test(basename(file))) return

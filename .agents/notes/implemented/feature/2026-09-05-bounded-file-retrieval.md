@@ -1,4 +1,4 @@
-# Agent Note: 先搜索定位，再分页读取文件，写入采用完整覆盖
+# Agent Note: 先搜索定位，再分页读取文件
 
 Status: implemented
 
@@ -14,19 +14,19 @@ search_files 返回路径、行号和有限的命中行；read_file 接受从 1 
 
 read_file 默认最多返回 500 行，单次 limit 不超过 2000；底层仍整文件读取，默认大小上限为 5 MiB。搜索跳过大于 2 MiB 的文件、限制结果数，并将单条命中截至 160 字符。
 
-write_file 接受完整新内容、创建父目录并整体覆盖，不提供 patch 或追加协议。工具接入遵循[注册表](../architecture/2026-08-31-tool-registry-boundary.md)，读取权限见[共享路径检查](../bug-fix/2026-09-06-shared-read-guards.md)。
+read_file 返回整文件 SHA-256，保留原始换行，拒绝二进制及无法无损解码的 UTF-8。write_file 只创建新文件，已有文件的修改归[安全增量编辑](2026-09-21-safe-incremental-editing.md)，该决定取代早期完整覆盖策略。工具接入遵循[注册表](../architecture/2026-08-31-tool-registry-boundary.md)，读取权限见[共享路径检查](../bug-fix/2026-09-06-shared-read-guards.md)。
 
 ## Alternatives considered
 
 - 继续整文件返回：小文件时最直接，但定位和传输成本随文件长度增长。
 - 只靠搜索片段修改文件：消耗少，但单行命中缺少周围约束，不能替代修改前读取。
-- 先实现通用增量 patch 工具：能减少整文件覆盖，但需要定义上下文匹配、冲突和失败行为，当前学习范围采用完整内容写回。
+- 只靠搜索片段构造通用 patch：调用紧凑，但缺少整文件版本证据；阶段 13 保留先读取再编辑的流程，把冲突协议放在独立编辑模块。
 
 ## Consequences
 
 模型可以围绕行号补读；代价是分页不等于流式 IO，工具结果仍可能被[上下文截断](../architecture/2026-09-05-bounded-conversation-context.md)再次压缩。
 
-当前搜索不检测二进制内容，也不提供完整 glob 语法；其默认起点“.”被目录守卫拒绝，实际应指定项目子目录。这是现有实现限制，不能写成已经修复。
+当前搜索不检测二进制内容，也不提供完整 glob 语法；阶段 13 已允许默认起点“.”并统一目录别名的真实敏感路径检查。
 
 ## Verification
 

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Tool } from './types.js'
+import type { Tool, ExecutionContext } from './types.js'
 
 // Note: 同步只读子 Agent 的委派协议 — 见 .agents/notes/implemented/feature/2026-09-19-isolated-readonly-subagent.md
 
@@ -15,7 +15,7 @@ const delegateParams = z.object({
 })
 
 export type DelegateRunner = (
-  task: string
+  task: string, context?: ExecutionContext
 ) => Promise<string>
 
 
@@ -31,6 +31,6 @@ export function createDelegateTaskTool(
       '需要副作用操作时，不要委派执行，只让子 Agent调查并返回建议。' +
       '子 Agent 返回结果后，由你继续决定是否执行主任务。',
     schema: delegateParams,
-    execute: async ({ task }) => run(task),
+    execute: async ({ task }, context) => run(task, context),
   }
 }

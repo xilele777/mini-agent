@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { ask, closeUI } from './ui.js'
+import { ask, closeUI, setInterruptHandler } from './ui.js'
 import { ConfigError, loadConfig } from './config.js'
 import { createRuntime } from './runtime.js'
 import {
@@ -20,6 +20,10 @@ import { clearApprovals } from './approval.js'
 
 async function main() {
   let session: SessionHandle | undefined
+  const controller = new AbortController()
+  const cancel = () => controller.abort()
+  process.on('SIGINT', cancel)
+  setInterruptHandler(cancel)
 
   try {
     const args = process.argv.slice(2)
@@ -66,7 +70,7 @@ async function main() {
     console.log('等待你的新指令；恢复不会自动执行旧调用。')
 
     for (;;) {
-      const input = (await ask('你> ')).trim()
+      const input = (await ask('你> ', controller.signal)).trim()
 
       if (!input) continue
       if (input === 'exit' || input === 'quit') break
@@ -74,7 +78,7 @@ async function main() {
       const result = await runSessionTurn(
         session,
         input,
-        runtime.turnOptions
+        { ...runtime.turnOptions, signal: controller.signal }
       )
 
       console.log(`[本轮 ${result.status}] ${result.reason}`)
@@ -101,6 +105,8 @@ async function main() {
 
     throw error
   } finally {
+    process.off('SIGINT', cancel)
+    setInterruptHandler(undefined)
     try {
       await session?.close()
     } finally {

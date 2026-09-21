@@ -1,4 +1,4 @@
-import type { Tool } from './tools/types.js'
+import type { Tool, PreparedAction, ExecutionContext } from './tools/types.js'
 import { ask } from './ui.js'
 
 /**
@@ -18,26 +18,34 @@ function actionKey(tool: Tool, args: unknown): string {
   return `${tool.name}\u0000${JSON.stringify(args)}`
 }
 
-export async function requestApproval(tool: Tool, args: unknown): Promise<boolean> {
-  const key = actionKey(tool, args)
+export async function requestApproval(
+  tool: Tool, args: unknown,
+  context: ExecutionContext & { action?: PreparedAction } = {},
+): Promise<boolean> {
+  context.signal?.throwIfAborted()
+  const key = context.action?.approvalKey ?? actionKey(tool, args)
+  const cacheable = tool.cacheApproval !== false
 
-  if (alwaysAllowed.has(key)) {
+  if (cacheable && alwaysAllowed.has(key)) {
     console.log(`  (${tool.name} 的相同动作本次会话已被允许,跳过确认)`)
     return true
   }
 
   // 缺少专用预览时展示完整参数，用户仍能检查具体动作。
-  const detail = tool.preview ? tool.preview(args) : JSON.stringify(args, null, 2)
+  const detail = context.action?.preview ?? (tool.preview ? tool.preview(args) : JSON.stringify(args, null, 2))
 
   console.log(`\n${LINE}`)
   console.log(`⚠️  Agent 请求执行:${tool.name}`)
   console.log(LINE)
-  console.log(detail)
+  // 防止文件或命令中的终端控制码隐藏真正的批准内容。
+  console.log(detail.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`))
   console.log(LINE)
 
   for (;;) {
     const answer = (
-      await ask('批准?  [y] 允许   [n] 拒绝   [a] 相同动作不再询问 > ')
+      await ask(cacheable
+        ? '批准?  [y] 允许   [n] 拒绝   [a] 相同动作不再询问 > '
+        : '批准本次文件变更?  [y] 允许   [n] 拒绝 > ', context.signal)
     )
       .trim()
       .toLowerCase()
@@ -50,12 +58,12 @@ export async function requestApproval(tool: Tool, args: unknown): Promise<boolea
       return false
     }
 
-    if (answer === 'a') {
+    if (answer === 'a' && cacheable) {
       alwaysAllowed.add(key)
       console.log('  已记住:本次会话内相同动作不再询问(重启即失效)')
       return true
     }
 
-    console.log('  请输入 y / n / a')
+    console.log(cacheable ? '  请输入 y / n / a' : '  请输入 y / n')
   }
 }

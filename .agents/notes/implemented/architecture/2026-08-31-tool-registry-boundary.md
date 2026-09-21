@@ -10,9 +10,11 @@ Status: implemented
 
 ## Decision
 
-主循环仅通过注册表取得工具 schema、准备调用、执行调用和恢复状态，不导入具体工具。Tool 统一描述 name、description、schema、execute，以及可选的 needsApproval、preview、endsTurn。
+主循环仅通过注册表取得工具 schema 和准备调用，再统一执行和记录结果，不导入具体工具。Tool 统一描述 name、description、schema、execute，以及可选的 needsApproval、preview、endsTurn、prepare 和 cacheApproval。execute 接收可选 ExecutionContext，传递共同 AbortSignal。
 
-`createToolRegistry(tools)` 从明确的 `Tool[]` 创建独立能力集合，并在建立时拒绝重复名称。同一个实例既生成模型可见的 function schema，也用 `prepareCall()` 完成查表、JSON 解析和 safeParse；未加入该实例的工具即使存在于程序中，也不能通过准备阶段。确认通过后才进入公共 `executeCall()`，可预期的错误转换为结果文本，返回模型修正。
+`createToolRegistry(tools)` 从明确的 `Tool[]` 创建独立能力集合，并在建立时拒绝重复名称。同一个实例既生成模型可见的 function schema，也用 `prepareCall()` 完成查表、JSON 解析和 safeParse；未加入该实例的工具即使存在于程序中，也不能通过准备阶段。主轮直接执行以保留异常的不确定结果语义；只读子 Agent 继续通过公共 `executeCall()` 将普通错误回填为文本。
+
+阶段 13 的可选 Tool.prepare 在 schema 验证之后、批准之前异步生成 PreparedAction，包含 preview、approvalKey 和捕获候选的 execute 闭包；主轮无需识别具体文件工具。文件工具未准备时的直接 execute 拒绝操作，避免旧入口绕开候选协议。具体约束见[安全增量编辑](../feature/2026-09-21-safe-incremental-editing.md)。
 
 `tools/index.ts` 提供 `createMainRegistry()`，由 `runtime.ts` 传入带配置的读取、shell 与委派工具后创建主集合；主循环通过 options 接收注册表，不再依赖全局 `MAIN_REGISTRY` 或包装函数。可实例化注册表也为[同步只读子 Agent](../feature/2026-09-19-isolated-readonly-subagent.md)提供能力隔离基础，使不同 Agent 共用准备逻辑而不共享全部工具。配置归属见[启动接线](../../implemented/architecture/2026-09-21-validated-runtime-config.md)。
 

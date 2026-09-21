@@ -28,7 +28,7 @@
   "scripts": {
     "dev": "tsx src/agent.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/context.test.ts src/guard.test.ts src/stream.test.ts src/turn.test.ts src/subagent.test.ts src/tools/delegate.test.ts src/tools/fs.test.ts src/tools/registry.test.ts src/config.test.ts src/runtime.test.ts src/session-storage.test.ts src/session.test.ts src/turn-lifecycle.test.ts src/session-runner.test.ts src/context-budget.test.ts src/context-wiring.test.ts src/compaction.test.ts",
+    "test": "tsx --test src/context.test.ts src/guard.test.ts src/stream.test.ts src/turn.test.ts src/subagent.test.ts src/tools/delegate.test.ts src/tools/fs.test.ts src/tools/registry.test.ts src/config.test.ts src/runtime.test.ts src/session-storage.test.ts src/session.test.ts src/turn-lifecycle.test.ts src/session-runner.test.ts src/context-budget.test.ts src/context-wiring.test.ts src/compaction.test.ts src/tools/edit.test.ts src/command.test.ts",
     "verify-notes": "tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts && tsx .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts",
     "board": "node scripts/build-notes-board.mjs --live",
     "board:bundle": "node scripts/build-notes-board.mjs --bundle",

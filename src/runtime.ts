@@ -40,9 +40,10 @@ export function createRuntime(
   const registry = createMainRegistry({
     readFile,
     bash: createBashTool(config),
-    delegate: createDelegateTaskTool((task) =>
+    delegate: createDelegateTaskTool((task, context) =>
       runSubAgent(task, {
         ...subagentOptions,
+        ...(context?.signal ? { signal: context.signal } : {}),
         onProgress: (message) => {
           console.log(`  [sub] ${message}`)
         },

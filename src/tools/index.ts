@@ -2,6 +2,7 @@ import type { Tool } from './types.js'
 import { calcTool } from './calc.js'
 import { timeTool } from './time.js'
 import { writeFileTool } from './fs.js'
+import { editFileTool } from './edit.js'
 import { grepTool } from './grep.js'
 import {
   finishTaskTool,
@@ -21,6 +22,7 @@ export function createMainRegistry(tools: {
     timeTool,
     tools.readFile,
     writeFileTool,
+    editFileTool,
     tools.bash,
     grepTool,
     ...(tools.todo ?? []),

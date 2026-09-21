@@ -9,6 +9,7 @@ import type { AppConfig } from './config.js'
 import { ContextBudgetError } from './context-budget.js'
 
 export interface ModelRequest {
+  signal?: AbortSignal
   messages: ChatCompletionMessageParam[]
   tools: ChatCompletionFunctionTool[]
   tool_choice?: ChatCompletionToolChoiceOption
@@ -52,6 +53,9 @@ export function createModelStream(
 
     // 覆盖整个流的生命周期，不只等待响应头。
     const controller = new AbortController()
+    request.signal?.throwIfAborted()
+    const abort = () => controller.abort()
+    request.signal?.addEventListener('abort', abort, { once: true })
     const timer = setTimeout(
       () => controller.abort(),
       config.requestTimeoutMs
@@ -82,6 +86,7 @@ export function createModelStream(
         throw new ModelTimeoutError()
       }
     } catch (error) {
+      request.signal?.throwIfAborted()
       if (controller.signal.aborted) {
         throw new ModelTimeoutError()
       }
@@ -100,6 +105,7 @@ export function createModelStream(
 
       throw error
     } finally {
+      request.signal?.removeEventListener('abort', abort)
       clearTimeout(timer)
       controller.abort()
     }

@@ -1,118 +1,42 @@
-import { existsSync } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { z } from 'zod'
 import { ROOT, guardPathRead } from '../guard.js'
+import { fingerprint } from './edit.js'
 import type { Tool } from './types.js'
-
-const PREVIEW_LINES = 20
-
-// ─────────────────────────── read_file ───────────────────────────
+export { writeFileTool } from './edit.js'
 
 const readParams = z.object({
-  path: z.string().min(1, '路径不能为空').describe('相对项目根目录的文件路径，例如 "src/agent.ts"'),
-  offset: z.number().int().min(1).default(1)
-    .describe('从第几行开始读（从 1 数起）。默认 1。文件很长需要分段时，用 offset 跳到指定行。'),
-  limit: z.number().int().min(1).max(2000).default(500)
-    .describe('最多读多少行。默认 500。一页没读完时，用 offset 翻页继续。'),
+  path: z.string().min(1).describe('相对项目根目录的文件路径'),
+  offset: z.number().int().min(1).default(1).describe('起始行号，从 1 开始'),
+  limit: z.number().int().min(1).max(2000).default(500).describe('最多读取行数'),
 })
 
-export function createReadFileTool(
-  maxReadBytes: number
-): Tool<z.infer<typeof readParams>> {
+export function createReadFileTool(maxReadBytes: number): Tool<z.infer<typeof readParams>> {
   return {
-  name: 'read_file',
-  description:
-    '读取项目目录内一个文本文件的一段内容（按行分页）。默认读前 500 行。' +
-    '文件很长时一次读不完，必须靠 offset 和 limit 分段翻页，直到看到"[已到文件末尾]"。' +
-    '只能读项目目录以内的文件，读不到 .env、.git、node_modules、私钥文件和超过上限的大文件。' +
-    '要修改文件时，必须先用本工具读出原内容，不要凭记忆重写。',
-  schema: readParams,
-
-  execute: async ({ path, offset, limit }) => {
-    const abs = resolve(ROOT, path)
-
-    const guarded = await guardPathRead(abs)
-    if (!guarded.ok) return guarded.message
-
-    try {
-      const st = await stat(abs)
-      if (st.size > maxReadBytes) {
-        return `错误:拒绝读取 "${path}" —— 文件 ${st.size} 字节,超过单次读取上限 ${Math.floor(maxReadBytes / 1024 / 1024)}MB。` +
-          `可以用 run_bash 的 ls / head / tail 处理这类大文件,或用 grep 搜索它的关键内容。`
+    name: 'read_file', schema: readParams,
+    description: '按行读取项目内文本文件，返回整文件 SHA-256，供 edit_file 校验基准版本。未到末尾时用 offset 翻页。拒绝项目外、敏感文件和超限文件。修改前必须先读取。内容保留原始换行。',
+    execute: async ({ path, offset, limit }) => {
+      const abs = resolve(ROOT, path)
+      const guarded = await guardPathRead(abs)
+      if (!guarded.ok) return guarded.message
+      try {
+        const info = await stat(abs)
+        if (!info.isFile()) return '错误:目标不是普通文件'
+        if (info.size > maxReadBytes) return `错误:文件超过单次读取上限 ${maxReadBytes} 字节`
+        const data = await readFile(abs)
+        if (data.length > maxReadBytes) return '错误:文件超过单次读取上限'
+        const all = data.toString('utf8')
+        if (all.includes('\0') || !Buffer.from(all).equals(data)) return '错误:只支持无 NUL 的 UTF-8 文本'
+        const hash = `SHA-256: ${fingerprint(data)}`
+        const lines = all.split('\n')
+        if (lines.at(-1) === '') lines.pop()
+        if (offset > lines.length) return `${hash}\n[文件 ${path} 共 ${lines.length} 行，第 ${offset} 行已超出范围，已到文件末尾]`
+        const end = Math.min(offset + limit - 1, lines.length)
+        return `${hash}\n[文件 ${path} 第 ${offset}~${end} 行 / 共 ${lines.length} 行，${end >= lines.length ? '已到文件末尾' : '后面还有内容，需要就加大 offset 继续读'}]\n` + lines.slice(offset - 1, end).join('\n')
+      } catch (error) {
+        return `错误:无法读取 "${path}" (${String(error)})`
       }
-
-      const all = await readFile(abs, 'utf8')
-      // 去掉末尾换行产生的额外空项，避免把它计为新的一行。
-      const lines = all.split('\n')
-      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-
-      const total = lines.length
-
-      // 明确报告分页已越过文件末尾，供模型停止翻页。
-      if (offset > total) {
-        return `[文件 ${path} 共 ${total} 行，第 ${offset} 行已超出范围，没有更多内容]`
-      }
-
-      const end = Math.min(offset + limit - 1, total)
-      const content = lines.slice(offset - 1, end).join('\n')
-      const done = end >= total
-      const note =
-        `[文件 ${path} 第 ${offset}~${end} 行 / 共 ${total} 行` +
-        (done ? '，已到文件末尾]' : '，后面还有内容，需要就加大 offset 继续读]')
-
-      return note + '\n' + content
-    } catch (e) {
-      return `错误:无法读取 "${path}"(${String(e)})。可以先用 run_bash 执行 ls 确认路径。`
-    }
-  },
-}
-}
-
-
-// ─────────────────────────── write_file ───────────────────────────
-
-const writeParams = z.object({
-  path: z.string().min(1, '路径不能为空').describe('要写入的文件路径,例如 "hello.txt"'),
-  content: z
-    .string()
-    .describe('要写入的完整文件内容。这是完整覆盖而不是追加,所以必须给出文件的全部内容。'),
-})
-
-/** 完整覆盖指定文件；路径可在项目外，批准预览需展示绝对路径和覆盖影响。 */
-export const writeFileTool: Tool<z.infer<typeof writeParams>> = {
-  name: 'write_file',
-  description:
-    '把内容写入一个文件。这是完整覆盖:文件已存在时原有内容会全部丢失。要在已有文件基础上修改,必须先 read_file 读出来,把修改后的完整内容整个写回。父目录不存在会自动创建。',
-  schema: writeParams,
-  needsApproval: true,
-
-  preview: ({ path, content }) => {
-    const abs = resolve(ROOT, path)
-    const exists = existsSync(abs)
-    const lines = content.split('\n')
-    const omitted = lines.length - PREVIEW_LINES
-
-    return [
-      exists ? `⚠️  覆盖已存在的文件:${abs}` : `新建文件:${abs}`,
-      exists ? '   (原有内容将全部丢失,且无法撤销)' : '',
-      `共 ${lines.length} 行 / ${content.length} 字符`,
-      '',
-      lines.slice(0, PREVIEW_LINES).join('\n'),
-      omitted > 0 ? `…(省略后 ${omitted} 行)` : '',
-    ]
-      .filter(Boolean)
-      .join('\n')
-  },
-
-  execute: async ({ path, content }) => {
-    const abs = resolve(ROOT, path)
-    try {
-      await mkdir(dirname(abs), { recursive: true })
-      await writeFile(abs, content, 'utf8')
-      return `已写入 ${abs}(${content.length} 字符)`
-    } catch (e) {
-      return `错误:写入 "${path}" 失败(${String(e)})`
-    }
-  },
+    },
+  }
 }

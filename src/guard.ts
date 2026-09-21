@@ -1,5 +1,5 @@
-import { realpath } from 'node:fs/promises'
-import { isAbsolute, relative } from 'node:path'
+import { lstat, realpath } from 'node:fs/promises'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 /**
  * read_file 与 search_files 共用的路径检查，调用方传入已解析的绝对路径。
@@ -13,7 +13,7 @@ export interface PathCheck {
   ok: true
   /** 调用方传入的词法绝对路径，用于展示及后续 IO。 */
   abs: string
-  /** realpath 成功时的真实路径；解析失败时回退为 abs。 */
+  /** 已验证的真实路径；无法解析时拒绝。 */
   real: string
 }
 
@@ -44,20 +44,20 @@ export function isBlocked(abs: string): boolean {
 
 /**
  * 用相对路径排除项目外路径，避免把同前缀的兄弟目录误判为项目内。
- * Windows 跨盘时 relative 返回绝对路径；当前实现也拒绝 ROOT 自身。
+ * Windows 跨盘时 relative 返回绝对路径；搜索目录可以是 ROOT 自身。
  */
-function lexicallyInsideRoot(abs: string): boolean {
-  const rel = relative(ROOT, abs)
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+function lexicallyInsideRoot(abs: string, allowRoot = false, root = ROOT): boolean {
+  const rel = relative(root, abs)
+  return (rel !== '' || allowRoot) && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
 }
 
 /**
  * 单文件读取检查：先校验词法路径，再对可解析的真实路径重复检查。
  * 链接指向项目外或敏感路径时拒绝，避免只检查表面的文件名。
- * realpath 失败时按当前策略放行到后续 IO，此分支没有验证链接目标。
+ * realpath 失败时拒绝，不把词法路径当成已验证真实路径。
  */
-export async function guardPathRead(abs: string): Promise<PathGuardResult> {
-  if (!lexicallyInsideRoot(abs)) {
+export async function guardPathRead(abs: string, allowRoot = false): Promise<PathGuardResult> {
+  if (!lexicallyInsideRoot(abs, allowRoot) || relative(ROOT, abs).includes(':')) {
     return {
       ok: false,
       message: `错误:拒绝读取 "${abs}"。它解析后指向项目目录(${ROOT})之外。只能操作项目目录以内的路径。`,
@@ -74,7 +74,7 @@ export async function guardPathRead(abs: string): Promise<PathGuardResult> {
 
   try {
     const real = await realpath(abs)
-    if (!lexicallyInsideRoot(real)) {
+    if (!lexicallyInsideRoot(real, allowRoot, await realpath(ROOT))) {
       return {
         ok: false,
         message:
@@ -93,36 +93,43 @@ export async function guardPathRead(abs: string): Promise<PathGuardResult> {
     }
     return { ok: true, abs, real }
   } catch {
-    // 解析失败时保留词法路径，是否可读交由后续文件 IO 判断。
-    return { ok: true, abs, real: abs }
+    return { ok: false, message: `错误:无法解析真实路径，拒绝操作 "${abs}"。` }
   }
 }
 
 /**
  * 校验搜索起点的项目范围；链接解析后仍在项目内时允许继续。
- * 起点自身仍受 lexicallyInsideRoot 约束，当前要求使用项目的子目录。
- * 敏感文件过滤及递归条目的链接跳过，由搜索工具在遍历时处理。
+ * 起点允许项目根；目录别名也检查真实敏感路径。
  */
 export async function guardDirRead(rootAbs: string): Promise<PathGuardResult> {
-  if (!lexicallyInsideRoot(rootAbs)) {
-    return {
-      ok: false,
-      message: `错误:"${rootAbs}" 解析到项目目录(${ROOT})之外。只能操作项目目录以内的路径。`,
-    }
-  }
+  return guardPathRead(rootAbs, true)
+}
 
-  try {
-    const real = await realpath(rootAbs)
-    if (!lexicallyInsideRoot(real)) {
-      return {
-        ok: false,
-        message:
-          `错误:"${rootAbs}" 经由符号链接指向项目目录之外的 "${real}"。` +
-          `符号链接不改变真实边界,请从项目目录以内的真实目录开始搜索。`,
-      }
-    }
-    return { ok: true, abs: rootAbs, real }
-  } catch {
-    return { ok: true, abs: rootAbs, real: rootAbs }
+// Note: 新建与增量编辑共用保守路径检查 — 见 .agents/notes/implemented/feature/2026-09-21-safe-incremental-editing.md
+/** 写入拒绝任何链接组件；允许尚不存在的后缀，并检查最近的已有父目录。 */
+export async function guardPathWrite(path: string): Promise<string> {
+  const abs = resolve(ROOT, path)
+  if (!lexicallyInsideRoot(abs) || isBlocked(abs) || relative(ROOT, abs).includes(':')) {
+    throw new Error(`拒绝写入项目之外或敏感路径: ${abs}`)
   }
+  let current = abs
+  for (;;) {
+    try {
+      const info = await lstat(current)
+      if (info.isSymbolicLink()) throw new Error(`拒绝写入链接路径: ${current}`)
+      if (current !== abs && !info.isDirectory()) throw new Error('父路径不是目录')
+      if (current === abs && (!info.isFile() || info.nlink > 1)) {
+        throw new Error('只允许普通、非硬链接文件')
+      }
+      const real = await realpath(current)
+      if (!lexicallyInsideRoot(real, true, await realpath(ROOT)) || isBlocked(real)) {
+        throw new Error('真实路径位于项目之外或敏感目录')
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    current = dirname(current)
+    if (relative(ROOT, current) === '') break
+  }
+  return abs
 }

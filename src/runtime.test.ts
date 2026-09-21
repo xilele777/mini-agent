@@ -287,3 +287,22 @@ test('启动缺少模型名时报告字段，不进入 REPL 或泄露密钥', ()
     !(child.stdout + child.stderr).includes(testConfig.apiKey)
   )
 })
+
+test('外部取消中止实际模型适配器的流，不误报为请求超时', async () => {
+  const controller = new AbortController()
+  const createStream = createModelStream(testConfig, async (_input, init) => {
+    const body = new ReadableStream({
+      start(stream) {
+        const abort = () => stream.error(new DOMException('cancelled', 'AbortError'))
+        init?.signal?.addEventListener('abort', abort, { once: true })
+        if (init?.signal?.aborted) abort()
+        setTimeout(() => controller.abort(), 20)
+      },
+    })
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } })
+  })
+  await assert.rejects(async () => {
+    const stream = await createStream({ messages: [], tools: [], signal: controller.signal })
+    for await (const _ of stream) { /* 消费至取消 */ }
+  }, { name: 'AbortError' })
+})

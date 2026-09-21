@@ -14,6 +14,7 @@ import type {
 } from './context.js'
 import { collectResponse } from './stream.js'
 import type { ToolRegistry } from './tools/registry.js'
+import { ToolPreparationError } from './tools/types.js'
 import {
   buildContext,
   ContextBudgetError,
@@ -53,6 +54,7 @@ const REJECTED =
   '如果因此无法继续当前任务，调用 pause_task 说明原因，等待用户新指令。'
 
 export interface TurnRequest {
+  signal?: AbortSignal
   messages: ChatCompletionMessageParam[]
   tools: ChatCompletionFunctionTool[]
   maxOutputTokens: number
@@ -100,6 +102,7 @@ export type TurnEvent =
   | { type: 'turn_end'; result: TurnResult }
 
 export interface RunTurnOptions {
+  signal?: AbortSignal
   createStream: CreateTurnStream
   registry: ToolRegistry
   maxIterations: number
@@ -162,12 +165,13 @@ export async function runTurn(
   let requestCount = 0
 
   const createStream: CreateTurnStream = async (request) => {
+    options.signal?.throwIfAborted()
     if (requestCount >= options.maxIterations) {
       throw new ContextBudgetError('主轮与摘要的模型请求次数预算已耗尽')
     }
     // 在真正开始请求前扣次数；传输失败也消耗本次额度。
     requestCount++
-    return options.createStream(request)
+    return options.createStream({ ...request, ...(options.signal ? { signal: options.signal } : {}) })
   }
 
   async function emit(event: TurnEvent): Promise<void> {
@@ -224,6 +228,7 @@ export async function runTurn(
     await emit({ type: 'messages' })
 
     while (requestCount < options.maxIterations) {
+      options.signal?.throwIfAborted()
       const tools = options.registry.getToolSchemas()
       const plan = options.prepareContext
         ? await options.prepareContext(messages, tools, {
@@ -297,6 +302,7 @@ export async function runTurn(
       }
 
       while (pending[0]) {
+        options.signal?.throwIfAborted()
         const item = pending[0]
         const { call } = item
 
@@ -345,14 +351,24 @@ export async function runTurn(
         }
 
         const { tool, args } = prepared
+        let action
+        try {
+          action = await tool.prepare?.(args)
+        } catch (error) {
+          if (!(error instanceof ToolPreparationError)) throw error
+          await record(item, 'not_executed', error.message)
+          continue
+        }
 
         if (
           tool.needsApproval &&
-          !await approve(tool, args)
+          !await approve(tool, args, { ...(options.signal ? { signal: options.signal } : {}), ...(action ? { action } : {}) })
         ) {
           await record(item, 'not_executed', REJECTED)
           continue
         }
+
+        options.signal?.throwIfAborted()
 
         // 保存成功后才能调用工具。
         // 所有工具统一记录，包含只读工具与 todo。
@@ -362,10 +378,13 @@ export async function runTurn(
           state: 'started',
         })
 
+        options.signal?.throwIfAborted()
         active = item
-        const observation = await tool.execute(args)
+        const context = options.signal ? { signal: options.signal } : {}
+        const observation = await (action ? action.execute(context) : tool.execute(args, context))
 
         await record(item, 'returned', observation)
+        options.signal?.throwIfAborted()
 
         log(
           `  → ${tool.name} ⇒ ` +
@@ -398,11 +417,13 @@ export async function runTurn(
         : `本轮失败：${String(error)}`
 
     if (active) {
+      const detail = error instanceof Error ? error.message : String(error)
+      log(detail)
       await record(
         active,
         'uncertain',
         '工具调用已经开始，但未取得正常返回；' +
-        '结果不确定，请先核查外部状态，不要直接重试。'
+        '结果不确定，请先核查外部状态，不要直接重试。\n' + detail
       )
     }
 
