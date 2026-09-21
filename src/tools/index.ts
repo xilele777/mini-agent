@@ -4,12 +4,6 @@ import { timeTool } from './time.js'
 import { writeFileTool } from './fs.js'
 import { grepTool } from './grep.js'
 import {
-  addTodoTool,
-  listTodoTool,
-  removeTodoTool,
-  loadTodoFromDisk,
-} from './todo.js'
-import {
   finishTaskTool,
   askUserTool,
   pauseTaskTool,
@@ -20,6 +14,7 @@ export function createMainRegistry(tools: {
   readFile: Tool
   bash: Tool
   delegate: Tool
+  todo?: Tool[]
 }) {
   return createToolRegistry([
     calcTool,
@@ -28,16 +23,10 @@ export function createMainRegistry(tools: {
     writeFileTool,
     tools.bash,
     grepTool,
-    addTodoTool,
-    listTodoTool,
-    removeTodoTool,
+    ...(tools.todo ?? []),
     finishTaskTool,
     askUserTool,
     pauseTaskTool,
     tools.delegate,
   ])
-}
-
-export async function initTools(): Promise<void> {
-  await loadTodoFromDisk()
 }

@@ -16,11 +16,12 @@ import { createDelegateTaskTool } from './tools/delegate.js'
 import { grepTool } from './tools/grep.js'
 import { calcTool } from './tools/calc.js'
 import { timeTool } from './tools/time.js'
+import type { Tool } from './tools/types.js'
 
-/** 组装依赖，不启动 REPL、不恢复 todo、不请求模型。 */
 export function createRuntime(
   config: AppConfig,
-  createStream: CreateTurnStream = createModelStream(config)
+  createStream: CreateTurnStream = createModelStream(config),
+  todoTools: Tool[] = []
 ) {
   const readFile = createReadFileTool(config.maxReadBytes)
 
@@ -46,6 +47,7 @@ export function createRuntime(
         },
       })
     ),
+    todo: todoTools,
   })
 
   const turnOptions: RunTurnOptions = {

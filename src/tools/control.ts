@@ -13,7 +13,7 @@ export const finishTaskTool: Tool<z.infer<typeof finishParams>> = {
     '用户本次请求已完成时调用。完成与否以当前请求为准，不要求历史待办全部清空。' +
     '如需输出总结，在调用本工具的同一条消息中输出；调用后本轮结束。',
   schema: finishParams,
-  endsTurn: true,
+  endsTurn: 'completed',
   execute: () => '本次请求已处理完毕。',
 }
 
@@ -48,6 +48,6 @@ export const pauseTaskTool: Tool<z.infer<typeof pauseParams>> = {
     '当前工作尚未完成，但必要操作被用户拒绝、用户取消或要求暂停时调用。' +
     '结束本轮并等待用户新指令，不把未完成的待办标记为完成。',
   schema: pauseParams,
-  endsTurn: true,
+  endsTurn: 'paused',
   execute: ({ reason }) => `本轮已暂停：${reason}`,
 }

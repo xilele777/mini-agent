@@ -9,8 +9,8 @@ export interface Tool<A = any> {
   /** 调用方先完成参数校验和必要的批准，再执行工具。 */
   execute: (args: A) => string | Promise<string>
 
-  /** 主循环回填结果后结束本轮；完成与暂停出口均可使用，不表示清空待办。 */
-  endsTurn?: boolean
+  /** 回填结果后结束本轮，并说明完成还是暂停。 */
+  endsTurn?: 'completed' | 'paused'
 
   /** 执行前是否需要检查人工批准，包括本次进程缓存的相同动作批准。 */
   needsApproval?: boolean

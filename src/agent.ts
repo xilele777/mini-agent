@@ -1,119 +1,95 @@
-import { initTools } from './tools/index.js'
-import { ask, closeUI } from './ui.js'
-import { trimHistory } from './context.js'
-import type { HistoryMessage } from './context.js'
-import {
-  runTurn,
-  SYSTEM_PROMPT,
-} from './turn.js'
 import 'dotenv/config'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { ask, closeUI } from './ui.js'
 import { ConfigError, loadConfig } from './config.js'
 import { createRuntime } from './runtime.js'
+import {
+  createSession,
+  openSession,
+  listSessions,
+  type SessionHandle,
+} from './session.js'
+import {
+  describeSession,
+  recoverSession,
+  runSessionTurn,
+} from './session-runner.js'
+import { createTodoTools } from './tools/todo.js'
+import { clearApprovals } from './approval.js'
 
-function isAbortError(error: unknown): boolean {
-  if (
-    error instanceof Error &&
-    error.name === 'AbortError'
-  ) {
-    return true
-  }
+async function main() {
+  let session: SessionHandle | undefined
 
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error
-  ) {
-    return error.code === 'ABORT_ERR'
-  }
-
-  return false
-}
-
-async function main(): Promise<void> {
   try {
-    // 通过注册表恢复工具状态，完成后才接收第一条用户请求。
-    const config = loadConfig(process.env, process.platform)
-    const runtime = createRuntime(config)
+    const args = process.argv.slice(2)
 
-    await initTools()
-
-    /*
-     * 对话历史跨 REPL 输入保留。
-     * todo 等工具状态由相应工具模块管理。
-     */
-    let messages: HistoryMessage[] = [
-      {
-        role: 'system',
-        content: SYSTEM_PROMPT,
-      },
-    ]
-
-    console.log(
-      'mini-agent 已启动。输入 exit 退出。'
-    )
-    console.log(`工作目录:${process.cwd()}\n`)
-
-    for (;;) {
-      const input = (
-        await ask('你> ')
-      ).trim()
-
-      if (input === '') continue
-
-      if (
-        input === 'exit' ||
-        input === 'quit'
-      ) {
-        break
+    if (args.length === 1 && args[0] === '--sessions') {
+      for (const row of await listSessions(process.cwd())) {
+        console.log(row.ok
+          ? `${row.id}  消息 ${row.messageCount} / 待办 ${row.todoCount}`
+          : `${row.id}  无法打开：${row.error}`)
       }
-
-      /*
-       * 上一轮结束后按 startsTurn 整轮裁剪，
-       * 然后再加入本轮的真实用户输入。
-       */
-      messages = trimHistory(messages)
-
-      /*
-       * 保存加入本轮输入前的位置。
-       * runTurn 抛出异常时，从这里回滚消息历史。
-       */
-      const checkpoint = messages.length
-
-      messages.push({
-        role: 'user',
-        content: input,
-        startsTurn: true,
-      })
-
-      try {
-        await runTurn(messages, runtime.turnOptions)
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw error
-        }
-
-        console.error(
-          `\n[本轮失败] ${String(error)}`
-        )
-
-        /*
-         * 这里只回滚对话历史。
-         * 已经发生的文件、shell 或 todo 副作用不会撤销。
-         */
-        messages.length = checkpoint
-
-        console.error(
-          '已回滚本轮,历史保持干净,可直接重新提问'
-        )
-      }
-
-      console.log()
+      return
     }
 
-    console.log('再见。')
+    const resume = args.length === 2 && args[0] === '--resume'
+      ? args[1]
+      : undefined
+
+    if (args.length && !resume) {
+      throw new Error('用法：npm run dev -- [--sessions | --resume UUID]')
+    }
+
+    // 先校验配置；配置错误不创建会话文件。
+    const config = loadConfig(process.env, process.platform)
+
+    session = resume
+      ? await openSession(process.cwd(), resume)
+      : await createSession(process.cwd())
+
+    clearApprovals()
+    await recoverSession(session)
+
+    const runtime = createRuntime(
+      config,
+      undefined,
+      createTodoTools(session)
+    )
+
+    if (existsSync(join(process.cwd(), '.mini-agent-todo.json'))) {
+      console.log('发现旧项目 todo 文件；已保留，不自动导入新会话。')
+    }
+
+    console.log('mini-agent 已启动。输入 exit 退出。')
+    console.log(describeSession(session))
+    console.log('等待你的新指令；恢复不会自动执行旧调用。')
+
+    for (;;) {
+      const input = (await ask('你> ')).trim()
+
+      if (!input) continue
+      if (input === 'exit' || input === 'quit') break
+
+      const result = await runSessionTurn(
+        session,
+        input,
+        runtime.turnOptions
+      )
+
+      console.log(`[本轮 ${result.status}] ${result.reason}`)
+
+      if (result.status === 'cancelled') break
+    }
   } catch (error) {
-    if (isAbortError(error)) {
-      console.log('\n已取消,退出。')
+    if (
+      error instanceof Error &&
+      (
+        error.name === 'AbortError' ||
+        ('code' in error && error.code === 'ABORT_ERR')
+      )
+    ) {
+      console.log('已取消。')
       return
     }
 
@@ -125,11 +101,15 @@ async function main(): Promise<void> {
 
     throw error
   } finally {
-    closeUI()
+    try {
+      await session?.close()
+    } finally {
+      closeUI()
+    }
   }
 }
 
-void main().catch(() => {
-  console.error('启动失败，请运行 npm run doctor 检查配置。')
+void main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
 })

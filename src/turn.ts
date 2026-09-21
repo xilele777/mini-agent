@@ -7,6 +7,7 @@ import { requestApproval } from './approval.js'
 import {
   detectRepeatedCall,
   toModelMessages,
+  trimHistory,
   truncateToolResult,
 } from './context.js'
 import type {
@@ -14,10 +15,7 @@ import type {
   ToolCallLog,
 } from './context.js'
 import { collectResponse } from './stream.js'
-import {
-  executeCall,
-  type ToolRegistry,
-} from './tools/registry.js'
+import type { ToolRegistry } from './tools/registry.js'
 
 // Note: 主轮与 REPL 分离，以模拟流测试生命周期控制 — 见 .agents/notes/implemented/architecture/2026-09-20-testable-turn-runner.md
 
@@ -69,183 +67,227 @@ export type CreateTurnStream = (
   request: TurnRequest
 ) => Promise<AsyncIterable<ChatCompletionChunk>>
 
+export type TurnStatus =
+  | 'completed'
+  | 'paused'
+  | 'cancelled'
+  | 'failed'
+  | 'budget_exhausted'
+
+export interface TurnResult {
+  status: TurnStatus
+  reason: string
+}
+
+type FunctionCall =
+  import('openai/resources/chat/completions').ChatCompletionMessageFunctionToolCall
+
+export type TurnEvent =
+  | { type: 'messages' }
+  | {
+      type: 'action'
+      messageIndex: number
+      call: FunctionCall
+      state: 'started' | 'returned' | 'not_executed' | 'uncertain'
+      observation?: string
+    }
+  | { type: 'turn_end'; result: TurnResult }
+
 export interface RunTurnOptions {
   createStream: CreateTurnStream
   registry: ToolRegistry
   maxIterations: number
   write?: (text: string) => void
   log?: (message: string) => void
+  approve?: typeof requestApproval
+  checkpoint?: (
+    event: TurnEvent,
+    messages: HistoryMessage[]
+  ) => Promise<void>
 }
 
-
-/**
- * 校验 → 按需批准 → 执行。
- *
- * 参数错误和批准拒绝不会直接结束本轮。
- */
-async function handleCall(
-  name: string,
-  rawArgs: string,
-  log: (message: string) => void,
-  registry: ToolRegistry
-): Promise<{
-  observation: string
-  endsTurn: boolean
-}> {
-  const prepared = registry.prepareCall(name, rawArgs)
-
-  if (!prepared.ok) {
-    log(`  ✗ ${name} 参数有误`)
-
-    return {
-      observation: prepared.error,
-      endsTurn: false,
-    }
-  }
-
-  const { tool, args } = prepared
-
-  if (tool.needsApproval) {
-    const approved = await requestApproval(tool, args)
-
-    if (!approved) {
-      log(`  ✗ ${tool.name} 被拒绝`)
-
-      return {
-        observation: REJECTED,
-        endsTurn: false,
-      }
-    }
-  }
-
-  const observation = await executeCall(tool, args)
-  const bounded = truncateToolResult(observation)
-
-  const firstLine = bounded.split('\n')[0] ?? ''
-  const more = bounded.includes('\n') ? ' …' : ''
-
-  log(`  → ${tool.name} ⇒ ${firstLine}${more}`)
-
-  return {
-    observation: bounded,
-    endsTurn: tool.endsTurn === true,
+/** 保存失败必须终止，不能当成普通工具错误让模型继续。 */
+export class CheckpointError extends Error {
+  constructor(cause: unknown) {
+    super('保存检查点失败，已停止；请核查最后可靠保存的状态', {
+      cause,
+    })
+    this.name = 'CheckpointError'
   }
 }
 
-/**
- * 处理一次真实用户输入。
- *
- * 该函数直接修改传入的 messages：
- * - 写入模型回复；
- * - 写入工具结果；
- * - 写入内部继续提示。
- *
- * 完成、暂停、循环守卫或请求预算均可结束本轮。
- * 异常继续交给 agent.ts 回滚本轮历史。
- */
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (
+    error.name === 'AbortError' ||
+    ('code' in error && error.code === 'ABORT_ERR')
+  )
+}
+
+type PendingCall = {
+  messageIndex: number
+  call: FunctionCall
+}
+
+function modelMessages(
+  messages: HistoryMessage[]
+): ChatCompletionMessageParam[] {
+  const start = messages.findLastIndex((m) => m.startsTurn === true)
+
+  const view = start < 0 ? messages : [
+    ...trimHistory(messages.slice(0, start)),
+    ...messages.slice(start),
+  ]
+
+  return toModelMessages(view).map((message) =>
+    message.role === 'tool' && typeof message.content === 'string'
+      ? {
+          ...message,
+          content: truncateToolResult(message.content),
+        }
+      : message
+  )
+}
+
 export async function runTurn(
   messages: HistoryMessage[],
   options: RunTurnOptions
-): Promise<void> {
-  const maxIterations =
-    options.maxIterations
-
+): Promise<TurnResult> {
   if (
-    !Number.isInteger(maxIterations) ||
-    maxIterations <= 0
+    !Number.isInteger(options.maxIterations) ||
+    options.maxIterations <= 0
   ) {
     throw new Error('主 Agent 请求上限必须是正整数')
   }
 
-  const createStream =
-    options.createStream
-
-  const write =
-    options.write ??
-    ((text: string) => {
-      process.stdout.write(text)
-    })
-
-  const log =
-    options.log ??
-    ((message: string) => {
-      console.log(message)
-    })
+  const write = options.write ?? ((text: string) => {
+    process.stdout.write(text)
+  })
+  const log = options.log ?? ((text: string) => {
+    console.log(text)
+  })
+  const approve = options.approve ?? requestApproval
 
   const recentCalls: ToolCallLog[] = []
   let loopHits = 0
+  let pending: PendingCall[] = []
+  let active: PendingCall | undefined
 
-  for (
-    let iteration = 0;
-    iteration < maxIterations;
-    iteration++
-  ) {
-    const stream = await createStream({
-      messages: toModelMessages(messages),
-      tools: options.registry.getToolSchemas(),
+  async function emit(event: TurnEvent): Promise<void> {
+    if (!options.checkpoint) return
+
+    try {
+      await options.checkpoint(
+        structuredClone(event),
+        structuredClone(messages)
+      )
+    } catch (error) {
+      throw new CheckpointError(error)
+    }
+  }
+
+  async function finish(
+    status: TurnStatus,
+    reason: string
+  ): Promise<TurnResult> {
+    const result = { status, reason }
+    await emit({ type: 'turn_end', result })
+    return result
+  }
+
+  async function record(
+    item: PendingCall,
+    state: 'returned' | 'not_executed' | 'uncertain',
+    observation: string
+  ): Promise<void> {
+    messages.push({
+      role: 'tool',
+      tool_call_id: item.call.id,
+      content: observation,
     })
 
-    let wroteText = false
+    await emit({
+      type: 'action',
+      ...item,
+      state,
+      observation,
+    })
 
-    const { message, usage } = await (async () => {
-      try {
-        return await collectResponse(
-          stream,
-          (text) => {
+    pending.shift()
+    active = undefined
+  }
+
+  async function skipRemaining(reason: string): Promise<void> {
+    while (pending[0]) {
+      await record(pending[0], 'not_executed', reason)
+    }
+  }
+
+  try {
+    await emit({ type: 'messages' })
+
+    for (
+      let iteration = 0;
+      iteration < options.maxIterations;
+      iteration++
+    ) {
+      const stream = await options.createStream({
+        messages: modelMessages(messages),
+        tools: options.registry.getToolSchemas(),
+      })
+
+      let wroteText = false
+
+      const response = await (async () => {
+        try {
+          return await collectResponse(stream, (text) => {
             if (!wroteText) {
               write('\nAgent: ')
               wroteText = true
             }
-
             write(text)
-          }
-        )
-      } finally {
-        // 流中途失败时，也让错误信息从新的一行开始。
-        if (wroteText) {
-          write('\n')
+          })
+        } finally {
+          if (wroteText) write('\n')
         }
-      }
-    })()
+      })()
 
-    if (usage) {
-      log(
-        `  [ctx] 本轮 prompt=${usage.prompt_tokens}` +
+      const { message, usage } = response
+
+      if (usage) {
+        log(
+          `  [ctx] 本轮 prompt=${usage.prompt_tokens}` +
           ` completion=${usage.completion_tokens}` +
           ` total=${usage.total_tokens}`
-      )
-    }
-
-    messages.push(message)
-
-    const toolCalls = message.tool_calls
-
-    if (!toolCalls || toolCalls.length === 0) {
-      if (!wroteText) {
-        log('\nAgent: (空回复)')
+        )
       }
 
-      messages.push({
-        role: 'user',
-        content: CONTINUE_NUDGE,
+      const messageIndex = messages.length
+      messages.push(message)
+
+      pending = (message.tool_calls ?? []).map((call) => {
+        if (call.type !== 'function') {
+          throw new Error('不支持的工具调用类型')
+        }
+        return { messageIndex, call }
       })
 
-      continue
-    }
+      await emit({ type: 'messages' })
 
-    for (
-      let callIndex = 0;
-      callIndex < toolCalls.length;
-      callIndex++
-    ) {
-      const call = toolCalls[callIndex]
+      if (pending.length === 0) {
+        if (!wroteText) log('\nAgent: (空回复)')
 
-      // 只是满足 noUncheckedIndexedAccess。
-      if (!call) continue
+        messages.push({
+          role: 'user',
+          content: CONTINUE_NUDGE,
+        })
+        await emit({ type: 'messages' })
+        continue
+      }
 
-      const isFunction = call.type === 'function'
+      while (pending[0]) {
+        const item = pending[0]
+        const { call } = item
 
-      if (isFunction) {
         recentCalls.push({
           name: call.function.name,
           argsKey: call.function.arguments,
@@ -258,104 +300,105 @@ export async function runTurn(
 
         if (guard) {
           loopHits++
-
           log(
             `  ⚠ ${call.function.name} 触发循环守卫` +
-              `(${loopHits}/${MAX_LOOP_HITS})`
+            `(${loopHits}/${MAX_LOOP_HITS})`
           )
 
-          messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            content: guard,
-          })
+          await record(item, 'not_executed', guard)
 
           if (loopHits >= MAX_LOOP_HITS) {
-            /*
-             * 当前调用已经回填循环守卫结果。
-             * 同一响应中剩余的调用也必须补齐结果。
-             */
-            for (
-              const rest of toolCalls.slice(
-                callIndex + 1
-              )
-            ) {
-              const restName =
-                rest.type === 'function'
-                  ? rest.function.name
-                  : rest.type
-
-              messages.push({
-                role: 'tool',
-                tool_call_id: rest.id,
-                content:
-                  `[本轮因循环守卫中止,未执行]。` +
-                  `如果这是你想做的 "${restName}" 动作,` +
-                  '请在用户给出新指令后重新发起。',
-              })
-            }
-
-            log(
-              `\n[中止] 循环守卫已触发 ` +
-                `${MAX_LOOP_HITS} 次仍不收敛,本轮放弃。`
+            await skipRemaining(
+              '[本轮因循环守卫中止，未执行]。等待用户新指令。'
             )
 
-            return
+            const reason =
+              `循环守卫已触发 ${MAX_LOOP_HITS} 次仍不收敛，本轮放弃。`
+
+            log(`\n[中止] ${reason}`)
+            return await finish('failed', reason)
           }
 
           continue
         }
-      }
 
-      /*
-       * collectResponse 当前只组装 function 调用，
-       * 这里仍保留不支持类型的防御性回填。
-       */
-      const { observation, endsTurn } = isFunction
-        ? await handleCall(
-            call.function.name,
-            call.function.arguments,
-            log,
-            options.registry
-          )
-        : {
-            observation:
-              `错误:不支持的工具调用类型 ` +
-              `"${call.type}"。`,
-            endsTurn: false,
-          }
+        const prepared = options.registry.prepareCall(
+          call.function.name,
+          call.function.arguments
+        )
 
-      messages.push({
-        role: 'tool',
-        tool_call_id: call.id,
-        content: observation,
-      })
-
-      if (endsTurn) {
-        /*
-         * 当前结束工具已经执行并回填。
-         * 同批剩余调用不能执行，但仍必须保持 ID 配对。
-         */
-        for (
-          const rest of toolCalls.slice(
-            callIndex + 1
-          )
-        ) {
-          messages.push({
-            role: 'tool',
-            tool_call_id: rest.id,
-            content:
-              '本轮已结束，此工具调用未执行。等待用户新指令。',
-          })
+        if (!prepared.ok) {
+          await record(item, 'not_executed', prepared.error)
+          continue
         }
 
-        return
+        const { tool, args } = prepared
+
+        if (
+          tool.needsApproval &&
+          !await approve(tool, args)
+        ) {
+          await record(item, 'not_executed', REJECTED)
+          continue
+        }
+
+        // 保存成功后才能调用工具。
+        // 所有工具统一记录，包含只读工具与 todo。
+        await emit({
+          type: 'action',
+          ...item,
+          state: 'started',
+        })
+
+        active = item
+        const observation = await tool.execute(args)
+
+        await record(item, 'returned', observation)
+
+        log(
+          `  → ${tool.name} ⇒ ` +
+          (truncateToolResult(observation).split('\n')[0] ?? '')
+        )
+
+        if (tool.endsTurn) {
+          await skipRemaining(
+            '本轮已结束，此工具调用未执行。等待用户新指令。'
+          )
+          return await finish(tool.endsTurn, observation)
+        }
       }
     }
-  }
 
-  log(
-    `\n[中止] 连续 ${maxIterations} 轮` +
-      '仍未得出结论,本轮放弃。'
-  )
+    const reason =
+      `连续 ${options.maxIterations} 轮仍未得出结论，本轮放弃。`
+
+    log(`\n[中止] ${reason}`)
+    return await finish('budget_exhausted', reason)
+  } catch (error) {
+    // 保存失败后立即上抛，不再执行动作或追加收尾记录。
+    if (error instanceof CheckpointError) throw error
+
+    const cancelled = isAbortError(error)
+    const reason = cancelled
+      ? '本轮已取消。'
+      : `本轮失败：${String(error)}`
+
+    if (active) {
+      await record(
+        active,
+        'uncertain',
+        '工具调用已经开始，但未取得正常返回；' +
+        '结果不确定，请先核查外部状态，不要直接重试。'
+      )
+    }
+
+    await skipRemaining(
+      '本轮已中止，此工具调用未执行。等待用户新指令。'
+    )
+
+    return await finish(
+      cancelled ? 'cancelled' : 'failed',
+      reason
+    )
+  }
 }

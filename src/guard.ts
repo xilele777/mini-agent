@@ -33,6 +33,8 @@ export const BLOCKED: { re: RegExp; why: string }[] = [
   { re: /(^|[/\\])\.git([/\\]|$)/i, why: '.git 内部对象不该进上下文' },
   { re: /(^|[/\\])node_modules([/\\]|$)/i, why: 'node_modules 会瞬间撑爆上下文' },
   { re: /(^|[/\\])id_rsa|\.(pem|key)$/i, why: '这看起来是私钥' },
+  {re: /(^|[/\\])\.mini-agent([/\\]|$)/i, why: '会话内部状态不允许工具直接读写',
+},
 ]
 
 /** 只检查路径字符串，供文件 IO 之前过滤敏感路径。 */

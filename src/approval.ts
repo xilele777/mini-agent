@@ -7,6 +7,10 @@ import { ask } from './ui.js'
  */
 const alwaysAllowed = new Set<string>()
 
+export function clearApprovals(): void {
+  alwaysAllowed.clear()
+}
+
 const LINE = '─'.repeat(64)
 
 /** 使用 JSON.stringify 的原始键顺序，尚未做参数规范化。 */

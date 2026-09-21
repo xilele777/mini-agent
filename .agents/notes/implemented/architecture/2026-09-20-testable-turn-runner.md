@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-[turn.ts](../../../../src/turn.ts) 持有 `SYSTEM_PROMPT`、`runTurn()`、公共工具处理和本轮控制常量；[agent.ts](../../../../src/agent.ts) 只负责启动初始化、终端用户输入、跨轮历史裁剪、本轮 checkpoint 回滚、取消处理和 UI 释放。`runTurn(messages, options)` 保持直接修改传入历史的契约。
+[turn.ts](../../../../src/turn.ts) 持有 `SYSTEM_PROMPT`、`runTurn()`、工具处理和本轮控制常量；[agent.ts](../../../../src/agent.ts) 负责启动初始化、终端用户输入、跨轮历史裁剪、结果展示和 UI 释放。阶段 11 接入后，`runTurn(messages, options)` 直接维护传入历史并返回结构化结果，入口不再回滚本轮消息。
 
 `RunTurnOptions` 接收模型入口、工具集合与请求次数，并允许替换输出：
 
@@ -19,7 +19,7 @@ Status: implemented
 - `maxIterations`：入口传入已校验配置，默认配置仍为十，测试可以使用更小预算稳定构造耗尽分支。
 - `write` 与 `log`：生产默认写终端，测试使用无输出或收集函数检查控制信息。
 
-工具 schema 与准备使用注入的注册表，批准和执行继续使用 `requestApproval()` 及公共执行函数，没有建立第二套工具模拟框架。主循环测试使用无需批准的控制或计算工具，直接检查真实消息数组、工具调用 ID 和下一次模型请求。配置组装见[阶段 10 接线](../../implemented/architecture/2026-09-21-validated-runtime-config.md)。
+工具 schema 与准备使用注入的注册表。阶段 11 增加 approve 与等待完成的 checkpoint 窄注入；主轮直接调用已准备工具的 execute，避免吞掉未知执行异常。工具抛错后停止，检查点失败向外传播，原始工具结果保留，模型视图单独截断。未建立通用执行框架；十项故障测试见 [turn-lifecycle.test.ts](../../../../src/turn-lifecycle.test.ts)。配置组装见[阶段 10 接线](../../implemented/architecture/2026-09-21-validated-runtime-config.md)。
 
 [turn.test.ts](../../../../src/turn.test.ts) 固化四类组合边界：`finish_task` 后同批剩余调用补“未执行”结果；连续相同调用累计两次命中守卫后补齐当前及剩余调用；持续纯文本达到请求上限且内部提示不产生真实用户轮；同一响应中的多个普通工具结果按各自 ID 回填并进入下一次请求。
 
