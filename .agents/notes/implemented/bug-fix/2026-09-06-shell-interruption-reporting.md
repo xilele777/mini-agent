@@ -16,7 +16,7 @@ run_bash 使用批准后的完整命令，工作目录固定为项目 ROOT，she
 
 POSIX 使用独立进程组并发送 SIGKILL；Windows Git Bash 使用 taskkill /PID /T /F，等待清理命令返回后再结算结果，清理失败尝试直接子进程终止。等待子进程关闭另有五秒退路，不无限挂起。清理消息只说明实际操作与返回状态，不宣称已经确认任意脱离进程树的后代退出。
 
-CLI 的 AbortController 经主轮传入批准和工具，SIGINT/readline Ctrl+C 触发同一信号，取消后保存结果并关闭会话。模型适配器、摘要请求包装、只读委派和 ask_user 同时传递该信号；阶段 14 仍负责更完整的取消组合验证和统一账目。
+CLI 的 AbortController 经每轮[运行控制器](../architecture/2026-09-22-runtime-resilience.md)传入批准和工具，SIGINT/readline Ctrl+C 触发生命周期信号，取消后保存结果并关闭会话。模型适配器、摘要请求包装、只读委派和 ask_user 共用本轮信号；总时限中断同样触发命令清理，但轮结果分类为 budget_exhausted，原始命令清理报告仍保留。
 
 危险正则仅用于批准预览的提醒，不解析或过滤 shell；这是[具体动作批准](../feature/2026-09-02-action-approval-scope.md)的辅助，而非命令白名单。结果之后还会经过[公共上下文截断](../architecture/2026-09-05-bounded-conversation-context.md)。
 

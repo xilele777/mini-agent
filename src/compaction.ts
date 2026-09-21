@@ -8,6 +8,7 @@ import { toModelMessages, type HistoryMessage } from './context.js'
 import { collectResponse } from './stream.js'
 import type { SessionHandle } from './session.js'
 import type { PrepareContext } from './turn.js'
+import { RunBudgetError } from './run-control.js'
 
 // Note: 一轮一次、先保存后发布与失败回退 — 见 .agents/notes/implemented/architecture/2026-09-05-bounded-conversation-context.md
 
@@ -91,6 +92,7 @@ export function createSessionContext(
     try {
       log(`  [ctx] 摘要原始消息 [${from}, ${through})，预留一次正常请求`)
       const stream = await requests.createStream({
+        scope: 'summary',
         messages: toModelMessages(source), tools: [], maxOutputTokens: outputReserve,
       })
       const { message, usage } = await collectResponse(stream, () => {})
@@ -126,6 +128,7 @@ export function createSessionContext(
       log(`  [ctx] 摘要已保存，覆盖到消息 ${through}，${Buffer.byteLength(next.content, 'utf8')} 字节`)
       return nextPlan
     } catch (error) {
+      if (error instanceof RunBudgetError) throw error
       if (error instanceof Error && (
         error.name === 'AbortError' || ('code' in error && error.code === 'ABORT_ERR')
       )) throw error

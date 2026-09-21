@@ -53,6 +53,11 @@ export function loadConfig(env: Env, platform: NodeJS.Platform) {
     MINI_AGENT_COMMAND_TIMEOUT_MS: timeout.default(30_000),
     MINI_AGENT_MAX_ITERATIONS: positiveInt.default(10),
     MINI_AGENT_SUBAGENT_MAX_ITERATIONS: positiveInt.default(6),
+    MINI_AGENT_MAX_REQUESTS: positiveInt.safe().default(24),
+    MINI_AGENT_MAX_TOTAL_TOKENS: positiveInt.safe().default(200_000),
+    MINI_AGENT_TURN_TIMEOUT_MS: timeout.default(600_000),
+    MINI_AGENT_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+    MINI_AGENT_RETRY_BASE_MS: positiveInt.max(10_000).default(500),
 
     MINI_AGENT_CONTEXT_WINDOW: positiveInt.default(32_768),
     MINI_AGENT_OUTPUT_RESERVE: positiveInt.default(4096),
@@ -101,6 +106,13 @@ export function loadConfig(env: Env, platform: NodeJS.Platform) {
     commandTimeoutMs: c.MINI_AGENT_COMMAND_TIMEOUT_MS,
     maxIterations: c.MINI_AGENT_MAX_ITERATIONS,
     subagentMaxIterations: c.MINI_AGENT_SUBAGENT_MAX_ITERATIONS,
+    runLimits: Object.freeze({
+      maxRequests: c.MINI_AGENT_MAX_REQUESTS,
+      maxTokens: c.MINI_AGENT_MAX_TOTAL_TOKENS,
+      timeoutMs: c.MINI_AGENT_TURN_TIMEOUT_MS,
+      maxRetries: c.MINI_AGENT_MAX_RETRIES,
+      retryBaseMs: c.MINI_AGENT_RETRY_BASE_MS,
+    }),
     maxReadBytes: c.MINI_AGENT_MAX_READ_MB * 1024 * 1024,
     contextBudget: Object.freeze({
       contextWindow: c.MINI_AGENT_CONTEXT_WINDOW,

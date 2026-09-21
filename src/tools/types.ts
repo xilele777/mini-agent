@@ -1,6 +1,7 @@
 import type { ZodType } from 'zod'
+import type { RunControl } from '../run-control.js'
 
-export interface ExecutionContext { signal?: AbortSignal }
+export interface ExecutionContext { signal?: AbortSignal; control?: RunControl }
 
 export interface PreparedAction {
   preview: string

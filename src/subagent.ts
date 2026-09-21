@@ -5,6 +5,9 @@ import type {
   ChatCompletionMessageParam,
 } from 'openai/resources/chat/completions'
 import { collectResponse } from './stream.js'
+import { randomUUID } from 'node:crypto'
+import { RunBudgetError, type RunControl } from './run-control.js'
+import { safeToolName } from './telemetry.js'
 import {
   detectRepeatedCall,
   truncateToolResult,
@@ -56,6 +59,7 @@ export type CreateSubAgentStream = (
 ) => Promise<AsyncIterable<ChatCompletionChunk>>
 
 export interface RunSubAgentOptions {
+  control?: RunControl
   signal?: AbortSignal
   createStream: CreateSubAgentStream
   registry: ToolRegistry
@@ -100,8 +104,10 @@ export async function runSubAgent(
     throw new Error('子 Agent 请求上限必须是正整数')
   }
 
+  const taskId = randomUUID()
   const createStream: CreateSubAgentStream = request => {
     options.signal?.throwIfAborted()
+    if (options.control) return options.control.stream(options.createStream, { ...request, scope: 'subagent', taskId })
     return options.createStream({ ...request, ...(options.signal ? { signal: options.signal } : {}) })
   }
 
@@ -179,6 +185,7 @@ export async function runSubAgent(
         () => undefined
       )
     } catch (error) {
+      if (error instanceof RunBudgetError) throw error
       if (error instanceof ContextBudgetError) {
         return `[子 Agent 上下文预算耗尽] ${error.message}`
       }
@@ -259,10 +266,18 @@ export async function runSubAgent(
               `错误:子 Agent 不能执行需要人工批准的工具 ` +
               `"${prepared.tool.name}"。`
           } else {
-            observation = await executeCall(
-              prepared.tool,
-              prepared.args
-            )
+            const action = options.control?.nextAction()
+            const emit = (state: 'started' | 'returned' | 'uncertain') => {
+              if (action !== undefined) options.control?.emit({ type: 'tool', scope: 'subagent', taskId, action, tool: safeToolName(prepared.tool.name), state })
+            }
+            emit('started')
+            try {
+              observation = await executeCall(prepared.tool, prepared.args, {
+                ...(options.signal ? { signal: options.signal } : {}),
+                ...(options.control ? { control: options.control } : {}),
+              })
+              emit('returned')
+            } catch (error) { emit('uncertain'); throw error }
           }
         }
       }

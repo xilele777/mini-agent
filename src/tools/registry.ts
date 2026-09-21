@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions'
-import type { Tool } from './types.js'
+import type { Tool, ExecutionContext } from './types.js'
 
 // Note: 工具集合同时约束 schema 与调用准备 — 见 .agents/notes/implemented/architecture/2026-08-31-tool-registry-boundary.md
 
@@ -105,11 +105,17 @@ export function createToolRegistry(
 /** 调用方完成准备及必要批准后执行工具。 */
 export async function executeCall(
   tool: Tool,
-  args: unknown
+  args: unknown,
+  context?: ExecutionContext,
 ): Promise<string> {
   try {
-    return await tool.execute(args)
+    context?.signal?.throwIfAborted()
+    const result = await tool.execute(args, context)
+    context?.signal?.throwIfAborted()
+    return result
   } catch (error) {
+    context?.signal?.throwIfAborted()
+    if (error instanceof Error && (error.name === 'AbortError' || error.name === 'RunBudgetError')) throw error
     return `错误:工具 "${tool.name}" 执行时抛出异常:${String(error)}`
   }
 }

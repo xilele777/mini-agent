@@ -12,7 +12,7 @@ REPL、操作批准和执行中提问都读取同一个 stdin。若每个模块�
 
 ui.ts 懒初始化唯一的 readline 实例，并通过 ask 与 closeUI 暴露输入和关闭能力。导入模块本身不打开输入流；main 在 finally 统一关闭。
 
-Ctrl+C 的 AbortError 向外层传播并转为取消退出，普通本轮错误由内层恢复历史。批准框和 ask_user 都复用这个输入入口；[动作批准](../feature/2026-09-02-action-approval-scope.md)与[显式出口](../feature/2026-09-11-explicit-turn-exits.md)使用各自的控制语义。
+Ctrl+C 经 CLI 生命周期信号中止当前等待并转为取消退出；轮内批准和 ask_user 接收本轮共享信号，包含[总时限](2026-09-22-runtime-resilience.md)。主轮保留已确认动作与结果不确定记录，不回退删除历史。批准框和 ask_user 都复用这个输入入口；[动作批准](../feature/2026-09-02-action-approval-scope.md)与[显式出口](../feature/2026-09-11-explicit-turn-exits.md)使用各自的控制语义。
 
 ## Alternatives considered
 

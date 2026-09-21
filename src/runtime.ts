@@ -44,6 +44,7 @@ export function createRuntime(
       runSubAgent(task, {
         ...subagentOptions,
         ...(context?.signal ? { signal: context.signal } : {}),
+        ...(context?.control ? { control: context.control } : {}),
         onProgress: (message) => {
           console.log(`  [sub] ${message}`)
         },
@@ -53,6 +54,7 @@ export function createRuntime(
   })
 
   const turnOptions: RunTurnOptions = {
+    runLimits: config.runLimits,
     createStream,
     contextBudget: config.contextBudget,
     registry,

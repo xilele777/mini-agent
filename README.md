@@ -16,6 +16,7 @@
 - 上下文工程：每次请求检查预算、按完整旧轮裁剪、持久化历史摘要、循环调用守卫
 - 路径安全：读取、搜索、新建和编辑均限制在项目内，并检查敏感路径及真实路径
 - 精确增量编辑、SHA-256 冲突检查、单文件原子提交；Ctrl+C 取消与命令进程树清理
+- 主轮、摘要、委派及有限重试共享总预算；类型化运行事件与脱敏 JSONL 轨迹
 
 ## 📦 内置工具
 
@@ -67,7 +68,17 @@ npm run doctor             # 配置与 shell 检查，不请求模型
 npm run doctor -- --online # 额外发起一次流式工具调用探针，可能计费
 ```
 
-可选环境变量：`MINI_AGENT_REQUEST_TIMEOUT_MS`（默认 120000）、`MINI_AGENT_COMMAND_TIMEOUT_MS`（30000）、`MINI_AGENT_MAX_ITERATIONS`（10）、`MINI_AGENT_SUBAGENT_MAX_ITERATIONS`（6）、`MINI_AGENT_MAX_READ_MB`（5）。明确填写的非法值会报错，不静默回退。当前次数为主／子循环的局部上限，尚非共享总预算；单请求超时尚非端到端取消。
+可选环境变量：`MINI_AGENT_REQUEST_TIMEOUT_MS`（默认 120000）、`MINI_AGENT_COMMAND_TIMEOUT_MS`（30000）、`MINI_AGENT_MAX_ITERATIONS`（10）、`MINI_AGENT_SUBAGENT_MAX_ITERATIONS`（6）、`MINI_AGENT_MAX_READ_MB`（5）。明确填写的非法值会报错，不静默回退。局部次数限制主／摘要与子任务逻辑请求，实际传输还必须取得下表的整轮预算。
+
+| 整轮配置 | 默认值 | 含义 |
+| --- | --- | --- |
+| `MINI_AGENT_MAX_REQUESTS` | 24 | 主请求、摘要、委派、重试的实际传输尝试总数 |
+| `MINI_AGENT_MAX_TOTAL_TOKENS` | 200000 | 发送前预留输入估算及输出上限，返回后按有效 usage 结算 |
+| `MINI_AGENT_TURN_TIMEOUT_MS` | 600000 | 从提交本轮输入起计时，包含批准、提问、退避及工具等待 |
+| `MINI_AGENT_MAX_RETRIES` | 2 | 零 chunk 时的额外重试次数，允许 0–5；SDK 隐式重试关闭 |
+| `MINI_AGENT_RETRY_BASE_MS` | 500 | 指数退避初始毫秒数，最长等待 10000ms |
+
+连接错误、请求超时及 HTTP 408/429/500/502/503/504 可有限重试；已经返回任何 chunk、认证失败、协议错误和工具执行不自动重试。缺少 usage 的请求保留预留估算，不记为零；token 总额不是供应商费用的精确硬保证。时间到期为 `budget_exhausted`，Ctrl+C 为 `cancelled`，命令单独超时为 `failed`。
 
 上下文配置：`MINI_AGENT_CONTEXT_WINDOW`（32768）、`MINI_AGENT_OUTPUT_RESERVE`（4096）、`MINI_AGENT_CONTEXT_MARGIN`（1024）。窗口应按实际模型能力设置；本地采用文本保守估算，并非服务端精确计数。输出上限默认使用 `max_completion_tokens`，兼容服务可用 `MINI_AGENT_OUTPUT_TOKEN_PARAM=max_tokens` 显式切换。
 
@@ -141,7 +152,20 @@ GitHub Actions 在 Windows／Ubuntu、Node 22 下定义上述检查，不需要 
 
 原始对话历史完整保存在会话中。模型每次只接收符合预算的派生视图；需要删除旧轮时，每个真实用户轮最多尝试一次摘要，保留目标、约束、确认动作、拒绝和待核查事项。摘要单独保存覆盖范围与原文指纹，恢复后不重复拼入已覆盖消息。
 
-摘要请求同样检查窗口并占用主轮请求次数，至少预留一次正常请求；完整旧轮无法放入摘要请求、生成／校验／保存失败时，沿用可发送的裁剪视图。当前轮本身仍超限则停止。摘要有损且可能失真，不是新授权；取消会停止而非回退后继续。主轮与摘要共享次数，委派仍有独立次数，全轮统一 token／时间／请求账目尚未实现。
+摘要请求同样检查窗口并占用主轮及整轮请求次数，开始前至少留一次正常请求额度；后续重试也扣总额，耗尽时不能额外借出回答额度。完整旧轮无法放入摘要请求、生成／校验／保存失败时，沿用可发送的裁剪视图。当前轮本身仍超限则停止。摘要有损且可能失真，不是新授权；取消或总预算耗尽直接停止。委派保留较小局部次数，同时共享全轮 token、时间和传输账目。
+
+### 阶段 14 人工验收
+
+自动故障注入可先运行 `npm run test:resilience`，不需要 API key，覆盖网络重试、流中断、共享预算、取消和脱敏。下面检查真实模型与本机交互；每次启动记录终端显示的会话 UUID。
+
+1. **正常任务与委派**：`npm run dev`，输入“计算 17×23，然后完成”；应得到 391、completed 和 `[run]` 请求／工具／token／耗时汇总。下一轮输入“通过 delegate_task 只读调查 package.json 的 npm scripts，返回后结束”。应出现 subagent 请求，轮末总次数包含子请求。
+2. **批准中取消**：请求“执行 run_bash 的 `echo stage14-check`，之后再计算 1+1”。在批准框按 Ctrl+C；命令和后续计算不得执行，本轮 cancelled。恢复同一会话应等待新输入，动作标为 not_executed。再分别在 `你>` 输入等待、模型响应等待或明确请求 `ask_user` 后按 Ctrl+C，均应退出而不触发后续动作。
+3. **总次数耗尽**：PowerShell 设置 `$env:MINI_AGENT_MAX_REQUESTS='1'` 后启动；输入“必须先调用 delegate_task 调查 package.json，再总结”。若模型按要求委派，子请求不得发出，总请求数为 1，本轮 budget_exhausted。退出后执行 `Remove-Item Env:MINI_AGENT_MAX_REQUESTS`。
+4. **批准等待计入总时限**：设置 `$env:MINI_AGENT_TURN_TIMEOUT_MS='30000'` 后启动，请求执行 `echo stage14-check`。批准框出现后保持不输入，直到自提交输入起 30 秒到期，应 budget_exhausted，命令不执行；若模型本身响应超过 30 秒，则应先在模型等待阶段停止。退出后执行 `Remove-Item Env:MINI_AGENT_TURN_TIMEOUT_MS`。
+5. **token 发送前拦截**：设置 `$env:MINI_AGENT_MAX_TOTAL_TOKENS='1'` 后启动并输入任意任务；应显示 budget_exhausted、请求 0，未访问模型。退出后执行 `Remove-Item Env:MINI_AGENT_MAX_TOTAL_TOKENS`。
+6. **检查轨迹**：打开 `.mini-agent/sessions/<UUID>/trace.jsonl`，核对相同 turnId 内的 request_start 数与 turn_end.requests 一致，委派含 taskId，摘要 scope 为 summary；request_end.accounting 缺 usage 时为 estimated。文件不应含用户正文、模型正文、密钥、命令参数、文件正文或异常原文。恢复会话、提交新任务应追加新 turnId，次数从头计算。
+
+每轮轨迹只保存白名单元数据，工具状态按本轮 action 编号关联；扩展工具名记为 other。轨迹写失败只警告一次，会话快照仍独立保存。**snapshot.json 保存完整原始对话，不属于脱敏轨迹**；终端显示的模型正文和批准预览也保留任务内容。轨迹不作为恢复来源，取消不撤销副作用；总截止后的命令树清理和可靠保存可能需要额外时间。
 
 ## 🛡️ 安全边界
 

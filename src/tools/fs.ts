@@ -16,7 +16,8 @@ export function createReadFileTool(maxReadBytes: number): Tool<z.infer<typeof re
   return {
     name: 'read_file', schema: readParams,
     description: '按行读取项目内文本文件，返回整文件 SHA-256，供 edit_file 校验基准版本。未到末尾时用 offset 翻页。拒绝项目外、敏感文件和超限文件。修改前必须先读取。内容保留原始换行。',
-    execute: async ({ path, offset, limit }) => {
+    execute: async ({ path, offset, limit }, context) => {
+      context?.signal?.throwIfAborted()
       const abs = resolve(ROOT, path)
       const guarded = await guardPathRead(abs)
       if (!guarded.ok) return guarded.message
@@ -24,7 +25,8 @@ export function createReadFileTool(maxReadBytes: number): Tool<z.infer<typeof re
         const info = await stat(abs)
         if (!info.isFile()) return '错误:目标不是普通文件'
         if (info.size > maxReadBytes) return `错误:文件超过单次读取上限 ${maxReadBytes} 字节`
-        const data = await readFile(abs)
+        const data = await readFile(abs, { signal: context?.signal })
+        context?.signal?.throwIfAborted()
         if (data.length > maxReadBytes) return '错误:文件超过单次读取上限'
         const all = data.toString('utf8')
         if (all.includes('\0') || !Buffer.from(all).equals(data)) return '错误:只支持无 NUL 的 UTF-8 文本'
@@ -35,6 +37,7 @@ export function createReadFileTool(maxReadBytes: number): Tool<z.infer<typeof re
         const end = Math.min(offset + limit - 1, lines.length)
         return `${hash}\n[文件 ${path} 第 ${offset}~${end} 行 / 共 ${lines.length} 行，${end >= lines.length ? '已到文件末尾' : '后面还有内容，需要就加大 offset 继续读'}]\n` + lines.slice(offset - 1, end).join('\n')
       } catch (error) {
+        context?.signal?.throwIfAborted()
         return `错误:无法读取 "${path}" (${String(error)})`
       }
     },

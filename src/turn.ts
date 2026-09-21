@@ -13,6 +13,8 @@ import type {
   ToolCallLog,
 } from './context.js'
 import { collectResponse } from './stream.js'
+import { RunControl, type RunLimits } from './run-control.js'
+import { renderEvent, safeToolName, type EventSink } from './telemetry.js'
 import type { ToolRegistry } from './tools/registry.js'
 import { ToolPreparationError } from './tools/types.js'
 import {
@@ -54,6 +56,8 @@ const REJECTED =
   '如果因此无法继续当前任务，调用 pause_task 说明原因，等待用户新指令。'
 
 export interface TurnRequest {
+  scope?: 'main' | 'summary' | 'subagent'
+  taskId?: string
   signal?: AbortSignal
   messages: ChatCompletionMessageParam[]
   tools: ChatCompletionFunctionTool[]
@@ -102,6 +106,9 @@ export type TurnEvent =
   | { type: 'turn_end'; result: TurnResult }
 
 export interface RunTurnOptions {
+  runLimits?: RunLimits
+  onEvent?: EventSink
+  control?: RunControl
   signal?: AbortSignal
   createStream: CreateTurnStream
   registry: ToolRegistry
@@ -135,6 +142,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 type PendingCall = {
+  action: number
   messageIndex: number
   call: FunctionCall
 }
@@ -157,6 +165,12 @@ export async function runTurn(
     console.log(text)
   })
   const approve = options.approve ?? requestApproval
+  const control = options.control ?? new RunControl(options.runLimits, options.signal, event => {
+    const rendered = renderEvent(event)
+    if (rendered) log(rendered)
+    options.onEvent?.(event)
+  })
+  const signal = control.signal
 
   const recentCalls: ToolCallLog[] = []
   let loopHits = 0
@@ -165,13 +179,13 @@ export async function runTurn(
   let requestCount = 0
 
   const createStream: CreateTurnStream = async (request) => {
-    options.signal?.throwIfAborted()
+    control.check()
     if (requestCount >= options.maxIterations) {
       throw new ContextBudgetError('主轮与摘要的模型请求次数预算已耗尽')
     }
     // 在真正开始请求前扣次数；传输失败也消耗本次额度。
     requestCount++
-    return options.createStream({ ...request, ...(options.signal ? { signal: options.signal } : {}) })
+    return control.stream(options.createStream, request)
   }
 
   async function emit(event: TurnEvent): Promise<void> {
@@ -193,6 +207,7 @@ export async function runTurn(
   ): Promise<TurnResult> {
     const result = { status, reason }
     await emit({ type: 'turn_end', result })
+    control.end(status)
     return result
   }
 
@@ -213,6 +228,7 @@ export async function runTurn(
       state,
       observation,
     })
+    control.emit({ type: 'tool', scope: 'main', taskId: null, action: item.action, tool: safeToolName(item.call.function.name), state })
 
     pending.shift()
     active = undefined
@@ -225,15 +241,16 @@ export async function runTurn(
   }
 
   try {
+    control.emit({ type: 'turn_start' })
     await emit({ type: 'messages' })
 
     while (requestCount < options.maxIterations) {
-      options.signal?.throwIfAborted()
+      control.check()
       const tools = options.registry.getToolSchemas()
       const plan = options.prepareContext
         ? await options.prepareContext(messages, tools, {
             createStream,
-            remaining: options.maxIterations - requestCount,
+            remaining: Math.min(options.maxIterations - requestCount, control.remainingRequests),
           })
         : buildContext(messages, tools, options.contextBudget)
 
@@ -285,7 +302,7 @@ export async function runTurn(
         if (call.type !== 'function') {
           throw new Error('不支持的工具调用类型')
         }
-        return { messageIndex, call }
+        return { messageIndex, call, action: control.nextAction() }
       })
 
       await emit({ type: 'messages' })
@@ -302,7 +319,7 @@ export async function runTurn(
       }
 
       while (pending[0]) {
-        options.signal?.throwIfAborted()
+        control.check()
         const item = pending[0]
         const { call } = item
 
@@ -360,15 +377,19 @@ export async function runTurn(
           continue
         }
 
-        if (
-          tool.needsApproval &&
-          !await approve(tool, args, { ...(options.signal ? { signal: options.signal } : {}), ...(action ? { action } : {}) })
-        ) {
-          await record(item, 'not_executed', REJECTED)
-          continue
+        if (tool.needsApproval) {
+          control.check()
+          control.emit({ type: 'approval', action: item.action, state: 'waiting' })
+          const allowed = await approve(tool, args, { signal, ...(action ? { action } : {}) })
+          control.check()
+          control.emit({ type: 'approval', action: item.action, state: allowed ? 'allowed' : 'denied' })
+          if (!allowed) {
+            await record(item, 'not_executed', REJECTED)
+            continue
+          }
         }
 
-        options.signal?.throwIfAborted()
+        control.check()
 
         // 保存成功后才能调用工具。
         // 所有工具统一记录，包含只读工具与 todo。
@@ -378,13 +399,15 @@ export async function runTurn(
           state: 'started',
         })
 
-        options.signal?.throwIfAborted()
+        // started 已可靠保存；此后的中断必须按 uncertain 收尾。
         active = item
-        const context = options.signal ? { signal: options.signal } : {}
+        control.check()
+        control.emit({ type: 'tool', scope: 'main', taskId: null, action: item.action, tool: safeToolName(tool.name), state: 'started' })
+        const context = { signal, control }
         const observation = await (action ? action.execute(context) : tool.execute(args, context))
 
         await record(item, 'returned', observation)
-        options.signal?.throwIfAborted()
+        control.check()
 
         log(
           `  → ${tool.name} ⇒ ` +
@@ -409,6 +432,10 @@ export async function runTurn(
     // 保存失败后立即上抛，不再执行动作或追加收尾记录。
     if (error instanceof CheckpointError) throw error
 
+    const originalError = error
+    // readline/命令可能把中止原因包装成 AbortError；保留总时限的预算分类。
+    if (signal.aborted) error = signal.reason
+
     const cancelled = isAbortError(error)
     const reason = cancelled
       ? '本轮已取消。'
@@ -417,7 +444,7 @@ export async function runTurn(
         : `本轮失败：${String(error)}`
 
     if (active) {
-      const detail = error instanceof Error ? error.message : String(error)
+      const detail = originalError instanceof Error ? originalError.message : String(originalError)
       log(detail)
       await record(
         active,
@@ -439,5 +466,7 @@ export async function runTurn(
           : 'failed',
       reason
     )
+  } finally {
+    if (!options.control) control.dispose()
   }
 }

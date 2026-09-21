@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
+import { createTrace, renderEvent } from './telemetry.js'
+import { RunControl } from './run-control.js'
 import type { HistoryMessage } from './context.js'
 import { messageSchema, type Session } from './session-schema.js'
 import type { SessionHandle } from './session.js'
@@ -93,47 +96,62 @@ export async function runSessionTurn(
   if (!input.trim()) throw new Error('用户输入不能为空')
 
   const turnId = randomUUID()
+  const state = session.snapshot
+  const log = options.log ?? console.log
+  const trace = createTrace(join(state.projectRoot, '.mini-agent', 'sessions', state.id, 'trace.jsonl'), state.id, turnId, log)
+  const control = new RunControl(options.runLimits, options.signal, event => {
+    trace.emit(event)
+    const line = renderEvent(event)
+    if (line) log(line)
+    options.onEvent?.(event)
+  })
 
-  await save(session, (draft) => {
-    if (draft.turns.at(-1)?.status === 'running') {
-      throw new Error('请先恢复中断的用户轮')
-    }
+  try {
+    await save(session, (draft) => {
+      if (draft.turns.at(-1)?.status === 'running') {
+        throw new Error('请先恢复中断的用户轮')
+      }
 
-    if (!draft.messages.length) {
+      if (!draft.messages.length) {
+        draft.messages.push({
+          role: 'system',
+          content: SYSTEM_PROMPT,
+        })
+      }
+
+      const start = draft.messages.length
       draft.messages.push({
-        role: 'system',
-        content: SYSTEM_PROMPT,
+        role: 'user',
+        content: input,
+        startsTurn: true,
       })
-    }
 
-    const start = draft.messages.length
-    draft.messages.push({
-      role: 'user',
-      content: input,
-      startsTurn: true,
+      draft.turns.push({
+        id: turnId,
+        start,
+        status: 'running',
+        reason: '',
+        actions: [],
+      })
     })
 
-    draft.turns.push({
-      id: turnId,
-      start,
-      status: 'running',
-      reason: '',
-      actions: [],
-    })
-  })
+    const messages: HistoryMessage[] = session.snapshot.messages
 
-  const messages: HistoryMessage[] = session.snapshot.messages
-
-  return runTurn(messages, {
-    ...options,
-    prepareContext: createSessionContext(
-      session, options.contextBudget, options.log ?? console.log
-    ),
-    checkpoint: (event, history) =>
-      save(session, (draft) =>
-        applyCheckpoint(draft, turnId, event, history)
+    return await runTurn(messages, {
+      ...options,
+      control,
+      prepareContext: createSessionContext(
+        session, options.contextBudget, log
       ),
-  })
+      checkpoint: (event, history) =>
+        save(session, (draft) =>
+          applyCheckpoint(draft, turnId, event, history)
+        ),
+    })
+  } finally {
+    control.dispose()
+    trace.close()
+  }
 }
 
 /** 只修复记录，绝不请求模型或重放工具。 */

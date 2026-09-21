@@ -29,7 +29,8 @@ function globToRegex(glob: string): RegExp {
  * 递归遍历普通目录与文件，读取目录失败时跳过该目录。
  * Dirent 的链接条目不会进入 isDirectory / isFile 分支，因此不会主动跟随链接。
  */
-async function walk(dir: string, onFile: (file: string) => Promise<void>): Promise<void> {
+async function walk(dir: string, onFile: (file: string) => Promise<void>, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
   let entries
   try {
     entries = await readdir(dir, { withFileTypes: true })
@@ -37,9 +38,10 @@ async function walk(dir: string, onFile: (file: string) => Promise<void>): Promi
     return
   }
   for (const entry of entries) {
+    signal?.throwIfAborted()
     const full = join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name) && !isBlocked(full) && (await guardDirRead(full)).ok) await walk(full, onFile)
+      if (!SKIP_DIRS.has(entry.name) && !isBlocked(full) && (await guardDirRead(full)).ok) await walk(full, onFile, signal)
     } else if (entry.isFile()) {
       await onFile(full)
     }
@@ -64,7 +66,9 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
     '结果有上限，没搜到或结果太多时，换更宽或更窄的关键词再试。',
   schema: grepParams,
 
-  execute: async ({ pattern, path, glob, maxResults }) => {
+  execute: async ({ pattern, path, glob, maxResults }, context) => {
+    const signal = context?.signal
+    signal?.throwIfAborted()
     // 将非法正则作为可修正的参数问题返回，便于模型调整表达式。
     let re: RegExp
     try {
@@ -101,8 +105,9 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
 
       let text: string
       try {
-        text = await readFile(file, 'utf8')
+        text = await readFile(file, { encoding: 'utf8', signal })
       } catch {
+        signal?.throwIfAborted()
         return // 读取失败时跳过该文件；此处没有额外的二进制格式检测。
       }
 
@@ -114,7 +119,8 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
           hits.push({ file: relPath, line: i + 1, text: show })
         }
       }
-    })
+    }, signal)
+    signal?.throwIfAborted()
 
     if (hits.length === 0) {
       const scope = glob ? `(文件名匹配 "${glob}")` : ''
