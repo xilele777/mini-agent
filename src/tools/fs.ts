@@ -7,19 +7,6 @@ import type { Tool } from './types.js'
 
 const PREVIEW_LINES = 20
 
-/**
- * 默认整文件读取上限。offset / limit 只控制返回行数，底层仍一次读入整个文件。
- * 读取前先检查文件大小，避免大文件占用过多内存。
- */
-export const MAX_READ_BYTES = 5 * 1024 * 1024
-
-/** 允许通过正数 MINI_AGENT_MAX_READ_MB 覆盖上限，无效配置使用默认值。 */
-function readLimit(): number {
-  const v = Number(process.env.MINI_AGENT_MAX_READ_MB)
-  if (!Number.isFinite(v) || v <= 0) return MAX_READ_BYTES
-  return v * 1024 * 1024
-}
-
 // ─────────────────────────── read_file ───────────────────────────
 
 const readParams = z.object({
@@ -30,7 +17,10 @@ const readParams = z.object({
     .describe('最多读多少行。默认 500。一页没读完时，用 offset 翻页继续。'),
 })
 
-export const readFileTool: Tool<z.infer<typeof readParams>> = {
+export function createReadFileTool(
+  maxReadBytes: number
+): Tool<z.infer<typeof readParams>> {
+  return {
   name: 'read_file',
   description:
     '读取项目目录内一个文本文件的一段内容（按行分页）。默认读前 500 行。' +
@@ -47,8 +37,8 @@ export const readFileTool: Tool<z.infer<typeof readParams>> = {
 
     try {
       const st = await stat(abs)
-      if (st.size > readLimit()) {
-        return `错误:拒绝读取 "${path}" —— 文件 ${st.size} 字节,超过单次读取上限 ${Math.floor(readLimit() / 1024 / 1024)}MB。` +
+      if (st.size > maxReadBytes) {
+        return `错误:拒绝读取 "${path}" —— 文件 ${st.size} 字节,超过单次读取上限 ${Math.floor(maxReadBytes / 1024 / 1024)}MB。` +
           `可以用 run_bash 的 ls / head / tail 处理这类大文件,或用 grep 搜索它的关键内容。`
       }
 
@@ -76,6 +66,7 @@ export const readFileTool: Tool<z.infer<typeof readParams>> = {
       return `错误:无法读取 "${path}"(${String(e)})。可以先用 run_bash 执行 ls 确认路径。`
     }
   },
+}
 }
 
 

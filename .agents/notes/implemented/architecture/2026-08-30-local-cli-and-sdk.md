@@ -12,7 +12,7 @@ Status: implemented
 
 项目使用 TypeScript、OpenAI-compatible 客户端和本地终端，直接实现 Agent 主循环。模型负责提出调用，本地程序负责校验与执行；运行入口是 agent.ts，index.ts 保留为独立 API 演示。
 
-模型连接配置集中在 llm.ts，密钥和地址来自环境变量。当前主循环使用完整响应；流式输出、向量检索和子 Agent 都不是已实现能力。功能逐阶段进入，具体协作方法由[独立教练工作流](../process/2026-09-11-learning-workflow-and-notes.md)管理。
+CLI 从环境加载配置，经 config.ts 校验，由 runtime.ts 组装模型流与工具集合；llm.ts 只消费显式配置。当前边界见[配置与启动诊断](../../implemented/architecture/2026-09-21-validated-runtime-config.md)。主循环通过独立组装器接收[流式模型响应](../feature/2026-09-13-streamed-model-response.md)，工具仍只在完整调用通过校验和必要批准后执行；[同步只读子 Agent](../feature/2026-09-19-isolated-readonly-subagent.md)通过普通工具结果回到同一主循环。功能逐阶段进入，具体协作方法由[独立教练工作流](../process/2026-09-11-learning-workflow-and-notes.md)管理。
 
 ## Alternatives considered
 
@@ -22,10 +22,10 @@ Status: implemented
 
 ## Consequences
 
-当前依赖规模小，主循环与协议细节可直接阅读；代价是错误处理、上下文管理和终端生命周期都需要自行实现。模型名和本机 shell 配置仍有固定值，不能把“兼容接口”理解成所有服务无需适配。
+当前依赖规模小，主循环与协议细节可直接阅读；代价是错误处理、上下文管理和终端生命周期都需要自行实现。生产入口的模型名和 shell 由环境配置提供，兼容服务的协议能力仍需 doctor 验证，不能把“兼容接口”理解成所有服务无需适配。index.ts 仍是保留旧配置方式的独立教学演示。
 
 后续能力是否加入，以学习目标和可验证的问题为依据；目录中没有对应实现的方向不标为已完成。
 
 ## Verification
 
-日期依据：[3db813f](https://github.com/xilele777/mini-agent/commit/3db813f) 于 2026-08-30 建立最小客户端，CLI 与工具链由后续提交演进。当前依据：[package.json](../../../../package.json)、[llm.ts](../../../../src/llm.ts)、[agent.ts](../../../../src/agent.ts)。历史学习设计只提供背景，技术版本以当前文件为准。
+日期依据：[3db813f](https://github.com/xilele777/mini-agent/commit/3db813f) 于 2026-08-30 建立最小客户端，CLI 与工具链由后续提交演进。当前依据：[package.json](../../../../package.json)、[llm.ts](../../../../src/llm.ts)、[agent.ts](../../../../src/agent.ts) 和 [turn.ts](../../../../src/turn.ts)。历史学习设计只提供背景，技术版本以当前文件为准。

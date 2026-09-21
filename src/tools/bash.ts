@@ -2,19 +2,14 @@ import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import { z } from 'zod'
 import type { Tool } from './types.js'
+import type { AppConfig } from '../config.js'
 
 const execAsync = promisify(exec)
 
-const TIMEOUT_MS = 30_000
 const MAX_OUTPUT = 4000
 // stdout / stderr 各自的缓冲上限；超限按中断处理，区别于普通非零退出。
 const MAX_BUFFER = 1024 * 1024
 
-/**
- * Windows 使用本机固定路径的 Git Bash，其他系统使用 /bin/sh。
- * 换机时需核对可执行文件路径，当前配置不依赖 PATH 查找。
- */
-const SHELL = process.platform === 'win32' ? 'D:\\Git\\bin\\bash.exe' : '/bin/sh'
 
 /**
  * 批准预览中的风险提示规则，不负责解析或阻止 shell 命令。
@@ -72,7 +67,13 @@ function reportInterrupted(err: { code?: string; killed?: boolean; stdout?: stri
     .join('\n\n')
 }
 
-export const bashTool: Tool<z.infer<typeof bashParams>> = {
+export function createBashTool(
+  config: Pick<AppConfig, 'shell' | 'commandTimeoutMs'>
+): Tool<z.infer<typeof bashParams>> {
+  const SHELL = config.shell
+  const TIMEOUT_MS = config.commandTimeoutMs
+
+  return {
   name: 'run_bash',
   description:
     `在用户本机执行一条 shell 命令,返回 stdout / stderr / 退出码。` +
@@ -87,7 +88,11 @@ export const bashTool: Tool<z.infer<typeof bashParams>> = {
     const hits = DANGER.filter((d) => d.re.test(command))
 
     // 批准预览展示完整命令，避免省略会影响用户判断的后续操作。
-    const lines = [`$ ${command}`]
+    const lines = [
+  `工作目录: ${process.cwd()}`,
+  `shell: ${SHELL}`,
+  `$ ${command}`,
+]
 
     if (hits.length > 0) {
       lines.push('', '⚠️  检测到危险模式:')
@@ -103,6 +108,7 @@ export const bashTool: Tool<z.infer<typeof bashParams>> = {
         timeout: TIMEOUT_MS,
         maxBuffer: MAX_BUFFER,
         shell: SHELL,
+        windowsHide: true,
       })
       const parts = [clip(stdout, 'stdout'), clip(stderr, 'stderr')].filter(Boolean)
       return parts.length > 0 ? parts.join('\n\n') : '命令执行成功,没有任何输出。'
@@ -135,4 +141,5 @@ export const bashTool: Tool<z.infer<typeof bashParams>> = {
         .join('\n\n')
     }
   },
+}
 }

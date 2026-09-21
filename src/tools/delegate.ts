@@ -1,4 +1,3 @@
-import { runSubAgent } from '../subagent.js'
 import { z } from 'zod'
 import type { Tool } from './types.js'
 
@@ -21,9 +20,7 @@ export type DelegateRunner = (
 
 
 export function createDelegateTaskTool(
-  run: DelegateRunner = (task) => runSubAgent(task, {
-    onProgress: (message) => console.log(`[sub] ${message}`),
-  })
+  run: DelegateRunner
 ): Tool<z.infer<typeof delegateParams>> {
   return {
     name: 'delegate_task',
@@ -37,4 +34,3 @@ export function createDelegateTaskTool(
     execute: async ({ task }) => run(task),
   }
 }
-export const delegateTaskTool = createDelegateTaskTool()

@@ -6,6 +6,9 @@ import {
   runTurn,
   SYSTEM_PROMPT,
 } from './turn.js'
+import 'dotenv/config'
+import { ConfigError, loadConfig } from './config.js'
+import { createRuntime } from './runtime.js'
 
 function isAbortError(error: unknown): boolean {
   if (
@@ -29,6 +32,9 @@ function isAbortError(error: unknown): boolean {
 async function main(): Promise<void> {
   try {
     // 通过注册表恢复工具状态，完成后才接收第一条用户请求。
+    const config = loadConfig(process.env, process.platform)
+    const runtime = createRuntime(config)
+
     await initTools()
 
     /*
@@ -80,7 +86,7 @@ async function main(): Promise<void> {
       })
 
       try {
-        await runTurn(messages)
+        await runTurn(messages, runtime.turnOptions)
       } catch (error) {
         if (isAbortError(error)) {
           throw error
@@ -111,10 +117,19 @@ async function main(): Promise<void> {
       return
     }
 
+    if (error instanceof ConfigError) {
+      console.error(error.message)
+      process.exitCode = 1
+      return
+    }
+
     throw error
   } finally {
     closeUI()
   }
 }
 
-void main()
+void main().catch(() => {
+  console.error('启动失败，请运行 npm run doctor 检查配置。')
+  process.exitCode = 1
+})

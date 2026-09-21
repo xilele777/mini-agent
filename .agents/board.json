@@ -7,7 +7,8 @@
     "loop": { "from": "result", "to": "model", "label": "继续调用模型" },
     "supports": [
       { "id": "context", "target": "model", "label": "提供对话历史" },
-      { "id": "todos", "target": "tools", "label": "工具按需读写" }
+      { "id": "todos", "target": "tools", "label": "工具按需读写" },
+      { "id": "delegation", "target": "tools", "label": "同步委派只读调查" }
     ],
     "branches": {
       "from": "tools",
@@ -28,24 +29,24 @@
       },
       {
         "id": "model", "title": "模型调用", "caption": "读取上下文，选择动作",
-        "behavior": ["把对话历史和工具说明一起发给模型，使用原生 Function Calling 接收动作。", "只有文字回复时，追加继续提示，引导它执行、提问、完成或暂停。"],
+        "behavior": ["把对话历史和工具说明一起发给模型，逐片显示文本并将 Function Calling 片段组装成完整消息。", "只有文字回复时，追加继续提示，引导它执行、提问、完成或暂停。"],
         "boundary": "模型可能判断错误。每个真实用户轮最多请求十次模型，重复调用另有守卫。",
-        "notes": ["implemented/architecture/2026-08-31-native-function-calling.md", "implemented/feature/2026-09-05-loop-guard-and-request-budget.md", "implemented/simplification/2026-08-31-remove-handwritten-react-parser.md"],
-        "sources": [{ "label": "agent.ts · runTurn", "path": "../src/agent.ts" }, { "label": "llm.ts · 模型连接", "path": "../src/llm.ts" }]
+        "notes": ["implemented/architecture/2026-08-31-native-function-calling.md", "implemented/feature/2026-09-13-streamed-model-response.md", "implemented/feature/2026-09-05-loop-guard-and-request-budget.md", "implemented/simplification/2026-08-31-remove-handwritten-react-parser.md"],
+        "sources": [{ "label": "turn.ts · runTurn", "path": "../src/turn.ts" }, { "label": "stream.ts · 流组装", "path": "../src/stream.ts" }, { "label": "llm.ts · 模型连接", "path": "../src/llm.ts" }]
       },
       {
         "id": "tools", "title": "工具执行", "caption": "校验 → 按需批准 → 执行",
-        "behavior": ["注册表查找工具并校验参数；需要批准的动作在你同意后才执行。", "读文件先定位再分页；写文件与命令分别按具体动作请求批准。"],
+        "behavior": ["注册表由明确的工具集合创建，同一集合同时决定模型能看见和程序能准备哪些调用。", "注册表查找工具并校验参数；需要批准的动作在你同意后才执行。", "读文件先定位再分页；写文件与命令分别按具体动作请求批准。"],
         "boundary": "拒绝会作为结果交回模型，不会自动结束本轮；shell 的人工批准也不等于沙箱隔离。",
         "notes": ["implemented/architecture/2026-08-31-tool-registry-boundary.md", "implemented/feature/2026-09-02-action-approval-scope.md", "implemented/feature/2026-09-05-bounded-file-retrieval.md", "implemented/bug-fix/2026-09-06-shared-read-guards.md", "implemented/bug-fix/2026-09-06-shell-interruption-reporting.md"],
-        "sources": [{ "label": "agent.ts · handleCall", "path": "../src/agent.ts" }, { "label": "tools/index.ts · 注册表", "path": "../src/tools/index.ts" }, { "label": "approval.ts · 批准", "path": "../src/approval.ts" }]
+        "sources": [{ "label": "turn.ts · handleCall", "path": "../src/turn.ts" }, { "label": "tools/registry.ts · 能力集合", "path": "../src/tools/registry.ts" }, { "label": "tools/index.ts · 主注册表", "path": "../src/tools/index.ts" }, { "label": "approval.ts · 批准", "path": "../src/approval.ts" }]
       },
       {
         "id": "result", "title": "结果回填", "caption": "成功、拒绝、错误都回填",
         "behavior": ["每次工具调用都配上相同 ID 的结果；过长的结果先截断，再写入历史。", "提前结束时，同批剩余调用补上“未执行”；异常时回滚本轮对话消息。"],
         "boundary": "回滚消息不会撤销已经发生的文件写入、命令执行或待办变更。",
         "notes": ["implemented/bug-fix/2026-09-06-tool-result-history-recovery.md", "implemented/architecture/2026-09-05-bounded-conversation-context.md"],
-        "sources": [{ "label": "agent.ts · 结果回填", "path": "../src/agent.ts" }, { "label": "context.ts · truncateToolResult", "path": "../src/context.ts" }]
+        "sources": [{ "label": "turn.ts · 结果回填", "path": "../src/turn.ts" }, { "label": "context.ts · truncateToolResult", "path": "../src/context.ts" }]
       },
       {
         "id": "context", "title": "对话上下文", "caption": "按完整用户轮保留历史",
@@ -60,6 +61,13 @@
         "boundary": "清单只保存计划；暂停状态、任务归属和多进程写入协调尚未实现。",
         "notes": ["implemented/architecture/2026-09-06-todo-json-persistence.md", "implemented/architecture/2026-09-10-todo-state-ownership.md"],
         "sources": [{ "label": "tools/todo.ts · 待办状态", "path": "../src/tools/todo.ts" }]
+      },
+      {
+        "id": "delegation", "title": "子 Agent 委派", "caption": "独立上下文，只读调查",
+        "behavior": ["主 Agent 通过 delegate_task 同步提交一个明确子任务，结果作为普通工具观察回填。", "每次委派新建独立消息历史，只开放读取、搜索、计算和时间工具；执行进度以 [sub] 日志显示。", "最后一次子请求撤下全部工具，根据已有证据总结或说明缺口。"],
+        "boundary": "当前不并行、不持久化、不共享 todo、不嵌套批准，也不能递归委派；只读上下文隔离不等于数据保密。",
+        "notes": ["implemented/feature/2026-09-19-isolated-readonly-subagent.md", "implemented/architecture/2026-08-31-tool-registry-boundary.md"],
+        "sources": [{ "label": "subagent.ts · 独立执行循环", "path": "../src/subagent.ts" }, { "label": "tools/delegate.ts · 委派入口", "path": "../src/tools/delegate.ts" }, { "label": "tools/registry.ts · 能力集合", "path": "../src/tools/registry.ts" }]
       },
       {
         "id": "ask", "title": "提问", "caption": "缺少必要信息",
@@ -108,6 +116,7 @@
         { "id": "implemented/architecture/2026-08-30-local-cli-and-sdk.md", "label": "本地 CLI，直接调用模型" },
         { "id": "implemented/architecture/2026-08-31-native-function-calling.md", "label": "使用原生 Function Calling" },
         { "id": "implemented/architecture/2026-08-31-tool-registry-boundary.md", "label": "用注册表统一管理工具" },
+        { "id": "implemented/feature/2026-09-13-streamed-model-response.md", "label": "流式显示，完整组装后执行" },
         { "id": "implemented/simplification/2026-08-31-remove-handwritten-react-parser.md", "label": "移除旧 ReAct 解析器" }
       ]
     },
@@ -118,7 +127,8 @@
         { "id": "implemented/architecture/2026-09-02-shared-terminal-input.md", "label": "共用一个终端输入实例" },
         { "id": "implemented/feature/2026-09-05-loop-guard-and-request-budget.md", "label": "防止重复调用与失控循环" },
         { "id": "implemented/feature/2026-09-11-explicit-turn-exits.md", "label": "区分完成、暂停和提问" },
-        { "id": "implemented/bug-fix/2026-09-06-tool-result-history-recovery.md", "label": "提前退出也补齐工具结果" }
+        { "id": "implemented/bug-fix/2026-09-06-tool-result-history-recovery.md", "label": "提前退出也补齐工具结果" },
+        { "id": "implemented/architecture/2026-09-20-testable-turn-runner.md", "label": "抽取可注入模型流的主轮执行器" }
       ]
     },
     {
@@ -145,6 +155,20 @@
       "notes": [
         { "id": "implemented/architecture/2026-09-06-todo-json-persistence.md", "label": "用 JSON 保存待办计划" },
         { "id": "implemented/architecture/2026-09-10-todo-state-ownership.md", "label": "模块管理状态，启动时恢复" }
+      ]
+    },
+    {
+      "id": "delegation",
+      "title": "子 Agent 委派",
+      "notes": [
+        { "id": "implemented/feature/2026-09-19-isolated-readonly-subagent.md", "label": "隔离上下文，以只读能力同步委派" }
+      ]
+    },
+    {
+      "id": "roadmap",
+      "title": "完善版 v1 路线",
+      "notes": [
+        { "id": "proposed/architecture/2026-09-20-practical-mini-agent-v1.md", "label": "以小而完整的本地 CLI 为完善版目标" }
       ]
     },
     {

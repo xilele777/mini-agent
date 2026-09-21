@@ -5,8 +5,10 @@
 ## 学习目标与背景
 
 - 通过手写本地 CLI Agent 理解模型调用、工具执行、状态、上下文和控制流程。
+- 最终形成一个微型但功能闭环、能够真实落地、细节精致且不靠冗余框架堆叠的本地 Agent；它既能作为个人工具使用，也能完整展示 Agent 实习所需的协议、安全、状态、可靠性和评测能力。
 - 学习者从 Agent 零基础开始，TypeScript 仍在学习中。讲解使用简体中文，结合当前项目的实际代码。
 - 保持渐进式学习，根据已经观察到的理解调整讲解，不因记录了“阶段完成”而推断所有细节均已掌握。
+- 默认按完整功能模块推进：一轮提供完整参考代码、集中解释关键原理、统一验收；遇到实际卡点再拆成小步。用户已明确要求加快节奏。
 
 ## 编辑与教学分工
 
@@ -18,7 +20,7 @@
 ## 项目技术约定
 
 - 运行入口是 [src/agent.ts](../../src/agent.ts)，启动命令为 `npm run dev`。
-- 依赖和版本以 [package.json](../../package.json) 为准，模型配置以 [src/llm.ts](../../src/llm.ts) 为准，不在交接中维护第二份版本清单。
+- 依赖和版本以 [package.json](../../package.json) 为准，运行配置由 [src/config.ts](../../src/config.ts) 校验、[src/runtime.ts](../../src/runtime.ts) 组装，[src/llm.ts](../../src/llm.ts) 消费已校验的模型配置，不在交接中维护第二份版本清单。
 - 项目采用 TypeScript、ES modules 与 tsx；源码 import 使用 `.js` 后缀。Zod 已提供 `z.toJSONSchema()`。
 - 编译约束以 [tsconfig.json](../../tsconfig.json) 为准；下标值可能为 `undefined`，应明确处理。
 - 主循环与工具注册表、真实用户轮、完成与暂停、动作批准的设计依据保存在 `.agents/notes/`，修改对应机制前检索。

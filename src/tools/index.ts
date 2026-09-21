@@ -1,35 +1,42 @@
 import type { Tool } from './types.js'
 import { calcTool } from './calc.js'
 import { timeTool } from './time.js'
-import { readFileTool, writeFileTool } from './fs.js'
-import { bashTool } from './bash.js'
+import { writeFileTool } from './fs.js'
 import { grepTool } from './grep.js'
-import { addTodoTool, listTodoTool, removeTodoTool, loadTodoFromDisk } from './todo.js'
-import { finishTaskTool, askUserTool, pauseTaskTool } from './control.js'
-
-import { createToolRegistry } from './registry.js'
-import { delegateTaskTool } from './delegate.js'
-export { executeCall } from './registry.js'
-export type { PreparedCall } from './registry.js'
-
-const ALL_TOOLS: Tool[] = [
-  calcTool,
-  timeTool,
-  readFileTool,
-  writeFileTool,
-  bashTool,
-  grepTool,
+import {
   addTodoTool,
   listTodoTool,
   removeTodoTool,
+  loadTodoFromDisk,
+} from './todo.js'
+import {
   finishTaskTool,
   askUserTool,
   pauseTaskTool,
-  delegateTaskTool,
-]
+} from './control.js'
+import { createToolRegistry } from './registry.js'
 
-const MAIN_REGISTRY = createToolRegistry(ALL_TOOLS)
-export const { getToolSchemas, prepareCall } = MAIN_REGISTRY
+export function createMainRegistry(tools: {
+  readFile: Tool
+  bash: Tool
+  delegate: Tool
+}) {
+  return createToolRegistry([
+    calcTool,
+    timeTool,
+    tools.readFile,
+    writeFileTool,
+    tools.bash,
+    grepTool,
+    addTodoTool,
+    listTodoTool,
+    removeTodoTool,
+    finishTaskTool,
+    askUserTool,
+    pauseTaskTool,
+    tools.delegate,
+  ])
+}
 
 export async function initTools(): Promise<void> {
   await loadTodoFromDisk()

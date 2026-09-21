@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { readFileTool } from './fs.js'
+import { createReadFileTool } from './fs.js'
+
+const readFileTool = createReadFileTool(5 * 1024 * 1024)
 
 // 这三类输入在路径检查阶段被拒绝，无需创建或读取目标文件。
 

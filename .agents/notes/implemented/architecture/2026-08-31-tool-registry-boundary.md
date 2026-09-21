@@ -14,7 +14,7 @@ Status: implemented
 
 `createToolRegistry(tools)` 从明确的 `Tool[]` 创建独立能力集合，并在建立时拒绝重复名称。同一个实例既生成模型可见的 function schema，也用 `prepareCall()` 完成查表、JSON 解析和 safeParse；未加入该实例的工具即使存在于程序中，也不能通过准备阶段。确认通过后才进入公共 `executeCall()`，可预期的错误转换为结果文本，返回模型修正。
 
-`tools/index.ts` 显式建立主能力集合，并导出公共包装接口；主循环继续通过统一接口取得 schema 和准备调用。可实例化注册表也为[同步只读子 Agent](../feature/2026-09-19-isolated-readonly-subagent.md)提供能力隔离基础。
+`tools/index.ts` 提供 `createMainRegistry()`，由 `runtime.ts` 传入带配置的读取、shell 与委派工具后创建主集合；主循环通过 options 接收注册表，不再依赖全局 `MAIN_REGISTRY` 或包装函数。可实例化注册表也为[同步只读子 Agent](../feature/2026-09-19-isolated-readonly-subagent.md)提供能力隔离基础，使不同 Agent 共用准备逻辑而不共享全部工具。配置归属见[启动接线](../../implemented/architecture/2026-09-21-validated-runtime-config.md)。
 
 这套结构建立在[原生调用协议](2026-08-31-native-function-calling.md)之上。initTools 汇集有状态工具的启动入口，但具体状态仍归工具模块所有。
 
@@ -32,4 +32,4 @@ Status: implemented
 
 ## Verification
 
-日期依据：[1c9e090](https://github.com/xilele777/mini-agent/commit/1c9e090) 于 2026-08-31 抽取接口与注册表；批准拆分和 initTools 属于后续维护。当前依据：[types.ts](../../../../src/tools/types.ts)、[registry.ts](../../../../src/tools/registry.ts)、[index.ts](../../../../src/tools/index.ts)、[registry.test.ts](../../../../src/tools/registry.test.ts) 和 [agent.ts](../../../../src/agent.ts)。2026-09-20 的当前工作区运行 `npm run typecheck` 通过，`npm test` 四十八条通过；其中四条注册表测试覆盖显式 schema、参数准备、未授权工具拒绝及重复名称。完整批准链路仍按既有人工交互证据理解。
+日期依据：[1c9e090](https://github.com/xilele777/mini-agent/commit/1c9e090) 于 2026-08-31 抽取接口与注册表；批准拆分和 initTools 属于后续维护。当前依据：[types.ts](../../../../src/tools/types.ts)、[registry.ts](../../../../src/tools/registry.ts)、[index.ts](../../../../src/tools/index.ts)、[registry.test.ts](../../../../src/tools/registry.test.ts) 和 [turn.ts](../../../../src/turn.ts)。2026-09-20 的当前工作区运行 `npm run typecheck` 通过，`npm test` 五十二条通过；其中四条注册表测试覆盖显式 schema、参数准备、未授权工具拒绝及重复名称。完整批准链路仍按既有人工交互证据理解。

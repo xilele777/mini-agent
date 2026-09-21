@@ -10,13 +10,13 @@ Status: implemented
 
 ## Decision
 
-主 Agent 通过 `delegate_task({ task })` 同步委派一个可独立调查的子任务。该工具不需要人工批准，也不结束主轮；它调用可替换的 runner，等待 `runSubAgent(task, options)` 返回，再把文本作为普通工具结果交回主 Agent。
+主 Agent 通过 `delegate_task({ task })` 同步委派一个可独立调查的子任务。该工具不需要人工批准，也不结束主轮；它调用启动工厂注入的 runner，等待 `runSubAgent(task, options)` 返回，再把文本作为普通工具结果交回主 Agent。
 
 每次 `runSubAgent()` 都新建只含专用 system 消息和 task 的消息数组，不继承主 Agent 的 system、用户历史、内部继续提示或工具结果。它复用[流式响应组装](2026-09-13-streamed-model-response.md)，但不把子模型的中间文本冒充主 Agent 答复；无工具调用的完整文本是本次委派结果。
 
 `createToolRegistry(tools)` 从显式 `Tool[]` 创建能力集合，同一个实例同时生成模型可见 schema 并执行 `prepareCall()`。子 Agent 的实例只包含 `read_file`、`search_files`、`calculate` 和 `current_time`；写入、shell、todo、用户交互、完成／暂停及 `delegate_task` 本身既不暴露，也不能通过准备阶段。
 
-子 Agent 在模块中建立只读注册表，模型入口和请求上限可通过 options 替换，默认使用现有 llm.ts 且上限为六次，仍有连续三次相同调用守卫。默认前五次可使用只读工具；最后一次撤下全部工具并加入总结提示，使预算耗尽时仍有一次机会根据已有证据返回结论或明确缺口。工具结果按原生调用 ID 回填子历史，过长结果沿用公共截断。真实执行通过 `onProgress` 报告请求、usage 和工具摘要，模拟测试可以保持静默。
+子 Agent 的注册表、模型入口和请求上限由 runtime.ts 组装后注入，默认上限为六次，仍有连续三次相同调用守卫。默认前五次可使用只读工具；最后一次撤下全部工具并加入总结提示，使预算耗尽时仍有一次机会根据已有证据返回结论或明确缺口。工具结果按原生调用 ID 回填子历史，过长结果沿用公共截断。真实执行通过 `onProgress` 报告请求、usage 和工具摘要，模拟测试可以保持静默。
 
 ## Execution boundary
 

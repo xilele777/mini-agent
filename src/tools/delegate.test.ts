@@ -3,7 +3,10 @@ import test from 'node:test'
 import {
   createDelegateTaskTool,
 } from './delegate.js'
-import { getToolSchemas, prepareCall } from './index.js'
+import { testRuntime } from '../test-runtime.js'
+
+const { getToolSchemas, prepareCall } =
+  testRuntime.turnOptions.registry
 
 test('主注册表暴露 delegate_task', () => {
   const names = getToolSchemas()

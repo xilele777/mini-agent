@@ -14,7 +14,10 @@ import type {
   ToolCallLog,
 } from './context.js'
 import { collectResponse } from './stream.js'
-import { executeCall, getToolSchemas, prepareCall } from './tools/index.js'
+import {
+  executeCall,
+  type ToolRegistry,
+} from './tools/registry.js'
 
 // Note: 主轮与 REPL 分离，以模拟流测试生命周期控制 — 见 .agents/notes/implemented/architecture/2026-09-20-testable-turn-runner.md
 
@@ -67,8 +70,9 @@ export type CreateTurnStream = (
 ) => Promise<AsyncIterable<ChatCompletionChunk>>
 
 export interface RunTurnOptions {
-  createStream?: CreateTurnStream
-  maxIterations?: number
+  createStream: CreateTurnStream
+  registry: ToolRegistry
+  maxIterations: number
   write?: (text: string) => void
   log?: (message: string) => void
 }
@@ -82,12 +86,13 @@ export interface RunTurnOptions {
 async function handleCall(
   name: string,
   rawArgs: string,
-  log: (message: string) => void
+  log: (message: string) => void,
+  registry: ToolRegistry
 ): Promise<{
   observation: string
   endsTurn: boolean
 }> {
-  const prepared = prepareCall(name, rawArgs)
+  const prepared = registry.prepareCall(name, rawArgs)
 
   if (!prepared.ok) {
     log(`  ✗ ${name} 参数有误`)
@@ -138,25 +143,12 @@ async function handleCall(
  * 完成、暂停、循环守卫或请求预算均可结束本轮。
  * 异常继续交给 agent.ts 回滚本轮历史。
  */
-async function createDefaultStream(
-  request: TurnRequest
-): Promise<AsyncIterable<ChatCompletionChunk>> {
-  const { client, MODEL } = await import('./llm.js')
-  return client.chat.completions.create({
-    model: MODEL,
-    messages: request.messages,
-    ...(request.tools.length > 0 ? { tools: request.tools } : {}),
-    stream: true,
-    stream_options: { include_usage: true },
-  })
-}
-
 export async function runTurn(
   messages: HistoryMessage[],
-  options: RunTurnOptions = {}
+  options: RunTurnOptions
 ): Promise<void> {
   const maxIterations =
-    options.maxIterations ?? 10
+    options.maxIterations
 
   if (
     !Number.isInteger(maxIterations) ||
@@ -166,7 +158,7 @@ export async function runTurn(
   }
 
   const createStream =
-    options.createStream ?? createDefaultStream
+    options.createStream
 
   const write =
     options.write ??
@@ -190,7 +182,7 @@ export async function runTurn(
   ) {
     const stream = await createStream({
       messages: toModelMessages(messages),
-      tools: getToolSchemas(),
+      tools: options.registry.getToolSchemas(),
     })
 
     let wroteText = false
@@ -323,7 +315,8 @@ export async function runTurn(
         ? await handleCall(
             call.function.name,
             call.function.arguments,
-            log
+            log,
+            options.registry
           )
         : {
             observation:

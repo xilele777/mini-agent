@@ -10,15 +10,10 @@ import {
   truncateToolResult,
 } from './context.js'
 import type { ToolCallLog } from './context.js'
-import { createToolRegistry, executeCall } from './tools/registry.js'
-import { readFileTool } from './tools/fs.js'
-import { grepTool } from './tools/grep.js'
-import { calcTool } from './tools/calc.js'
-import { timeTool } from './tools/time.js'
-
-const SUBAGENT_REGISTRY = createToolRegistry([
-  readFileTool, grepTool, calcTool, timeTool,
-])
+import {
+  executeCall,
+  type ToolRegistry,
+} from './tools/registry.js'
 
 // Note: 同步只读子 Agent 的上下文与能力边界 — 见 .agents/notes/implemented/feature/2026-09-19-isolated-readonly-subagent.md
 
@@ -51,8 +46,9 @@ export type CreateSubAgentStream = (
 ) => Promise<AsyncIterable<ChatCompletionChunk>>
 
 export interface RunSubAgentOptions {
-  createStream?: CreateSubAgentStream
-  maxIterations?: number
+  createStream: CreateSubAgentStream
+  registry: ToolRegistry
+  maxIterations: number
   onProgress?: (message: string) => void
 }
 
@@ -72,22 +68,9 @@ function getFinalText(
   return null
 }
 
-async function createDefaultStream(
-  request: SubAgentRequest
-): Promise<AsyncIterable<ChatCompletionChunk>> {
-  const { client, MODEL } = await import('./llm.js')
-  return client.chat.completions.create({
-    model: MODEL,
-    messages: request.messages,
-    ...(request.tools.length > 0 ? { tools: request.tools } : {}),
-    stream: true,
-    stream_options: { include_usage: true },
-  })
-}
-
 export async function runSubAgent(
   task: string,
-  options: RunSubAgentOptions = {}
+  options: RunSubAgentOptions
 ): Promise<string> {
   const normalizedTask = task.trim()
 
@@ -96,7 +79,7 @@ export async function runSubAgent(
   }
 
   const maxIterations =
-    options.maxIterations ?? 6
+    options.maxIterations
 
   if (
     !Number.isInteger(maxIterations) ||
@@ -106,7 +89,7 @@ export async function runSubAgent(
   }
 
   const createStream =
-    options.createStream ?? createDefaultStream
+    options.createStream
 
   const report =
     options.onProgress ?? (() => undefined)
@@ -154,7 +137,7 @@ export async function runSubAgent(
 
       tools: isFinalRequest
         ? []
-        : SUBAGENT_REGISTRY.getToolSchemas(),
+        : options.registry.getToolSchemas(),
     })
 
     const { message, usage } =
@@ -222,7 +205,7 @@ export async function runSubAgent(
             '你是子 Agent，请把当前进展和缺口返回主 Agent。'
         } else {
           const prepared =
-            SUBAGENT_REGISTRY.prepareCall(
+            options.registry.prepareCall(
               call.function.name,
               call.function.arguments
             )

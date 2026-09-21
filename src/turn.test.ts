@@ -11,6 +11,7 @@ import {
   type CreateTurnStream,
   type TurnRequest,
 } from './turn.js'
+import { testRuntime } from './test-runtime.js'
 
 function chunk(
   choices: ChatCompletionChunk['choices']
@@ -133,7 +134,7 @@ test(
     const requests: TurnRequest[] = []
 
     await runTurn(messages, {
-
+      ...testRuntime.turnOptions,
       createStream: queuedStream(
         [
           toolStream(
@@ -196,7 +197,7 @@ test(
     }
 
     await runTurn(messages, {
-
+      ...testRuntime.turnOptions,
       createStream: queuedStream(
         [
           toolStream({
@@ -297,7 +298,7 @@ test(
     const logs: string[] = []
 
     await runTurn(messages, {
-
+      ...testRuntime.turnOptions,
       createStream: queuedStream(
         [
           textStream('还在处理'),
@@ -350,7 +351,7 @@ test(
     const requests: TurnRequest[] = []
 
     await runTurn(messages, {
-
+      ...testRuntime.turnOptions,
       createStream: queuedStream(
         [
           toolStream(

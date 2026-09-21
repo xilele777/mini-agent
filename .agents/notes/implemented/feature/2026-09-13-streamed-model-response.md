@@ -12,9 +12,9 @@ Status: implemented
 
 读取结束后，有工具调用时结束原因必须是 `tool_calls`，无工具调用时必须是 `stop`。缺少结束标记、截断、过滤、不支持的调用类型，以及不完整、跳号或重复的调用标识均作为协议错误抛出。返回的函数调用按 index 排序且必须从零连续；当前只支持一个回复候选和 function 工具。
 
-完整响应中的非法 JSON 或业务参数保留原文，交给现有 [prepareCall](../../../../src/tools/index.ts) 解析和校验，再作为普通工具错误反馈给模型。协议完整性和工具契约校验因此保持为两层边界。
+完整响应中的非法 JSON 或业务参数保留原文，交给现有 [prepareCall](../../../../src/tools/registry.ts) 解析和校验，再作为普通工具错误反馈给模型。协议完整性和工具契约校验因此保持为两层边界。
 
-`runTurn()` 请求启用 `stream: true` 与 `stream_options.include_usage`。usage 在 choices 之前读取，以接收 choices 为空的尾部统计片段；终端文本由回调逐片输出，流正常组装后才将 assistant 消息加入历史并进入循环守卫、批准、执行和完成／暂停流程。接收异常继续沿用[本轮历史回退](../bug-fix/2026-09-06-tool-result-history-recovery.md)。
+`runTurn()` 使用的 [模型入口](../../../../src/llm.ts) 启用 `stream: true` 与 `stream_options.include_usage`。usage 在 choices 之前读取，以接收 choices 为空的尾部统计片段；终端文本由回调逐片输出，流正常组装后才将 assistant 消息加入历史并进入循环守卫、批准、执行和完成／暂停流程。接收异常继续沿用[本轮历史回退](../bug-fix/2026-09-06-tool-result-history-recovery.md)。
 
 ## Alternatives considered
 

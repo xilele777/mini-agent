@@ -10,6 +10,7 @@ import {
 import type {
   SubAgentRequest,
 } from './subagent.js'
+import { testRuntime } from './test-runtime.js'
 
 function chunk(
   choices: ChatCompletionChunk['choices']
@@ -104,7 +105,7 @@ test('初始请求只有独立 system 和 task，并只暴露只读工具', asyn
   const result = await runSubAgent(
     '检查项目入口',
     {
-
+      ...testRuntime.subagentOptions,
       createStream: async (request) => {
         captured = request
         return textStream('入口是 src/agent.ts')
@@ -143,7 +144,7 @@ test('只读工具结果回填后继续请求并返回最终文本', async () =>
   const result = await runSubAgent(
     '计算 6 * 7',
     {
-
+      ...testRuntime.subagentOptions,
       createStream: async (request) => {
         requestCount++
 
@@ -174,7 +175,7 @@ test('未加入只读集合的现存工具不能通过准备阶段', async () =>
   const result = await runSubAgent(
     '尝试写文件',
     {
-
+      ...testRuntime.subagentOptions,
       createStream: async (request) => {
         requestCount++
 
@@ -204,7 +205,7 @@ test('连续重复调用会被守卫拦截并允许模型收敛', async () => {
   const result = await runSubAgent(
     '反复计算',
     {
-
+      ...testRuntime.subagentOptions,
       maxIterations: 4,
 
       createStream: async (request) => {
@@ -238,7 +239,7 @@ test('最后一次请求撤下工具并要求直接总结', async () => {
   const result = await runSubAgent(
     '在有限预算内调查',
     {
-
+      ...testRuntime.subagentOptions,
       maxIterations: 2,
 
       createStream: async (request) => {
@@ -305,7 +306,7 @@ test('流协议错误继续向委派调用方传播', async () => {
     runSubAgent(
       '测试不完整响应',
       {
-
+        ...testRuntime.subagentOptions,
         createStream: async () => unfinished(),
       }
     ),

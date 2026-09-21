@@ -1,0 +1,8 @@
+{
+  "name": "shipping-boundary-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test src/shipping.test.ts"
+  }
+}
