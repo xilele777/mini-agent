@@ -1,13 +1,13 @@
 import 'dotenv/config'
-import { ConfigError, loadConfig } from './config.js'
-import {
-  checkModel,
-  checkShell,
-  type CheckResult,
-} from './doctor.js'
+import { ConfigError } from './config.js'
+import { runDoctor } from './doctor.js'
 
 async function main() {
   const args = process.argv.slice(2)
+  if (args.length === 1 && ['--help', '-h'].includes(args[0]!)) {
+    console.log('用法：npm run doctor -- [--online]\n默认检查配置与 shell；--online 请求模型，可能计费。')
+    return
+  }
 
   if (
     args.length > 1 ||
@@ -18,26 +18,7 @@ async function main() {
     return
   }
 
-  const config = loadConfig(process.env, process.platform)
-
-  console.log('[OK] 配置格式通过；密钥和原始配置值不显示。')
-
-  const report = (result: CheckResult) => {
-    console.log(`[${result.ok ? 'OK' : 'FAIL'}] ${result.message}`)
-
-    if (!result.ok) {
-      process.exitCode = 1
-    }
-  }
-
-  report(await checkShell(config))
-
-  if (args.includes('--online')) {
-    console.log('[检查] 将发起一次模型流式请求，可能产生费用。')
-    report(await checkModel(config))
-  } else {
-    console.log('[SKIP] 尚未检查模型连接；使用 --online 运行在线探针。')
-  }
+  await runDoctor(args.includes('--online'))
 }
 
 void main().catch((error: unknown) => {

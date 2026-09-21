@@ -12,6 +12,8 @@ REPL、操作批准和执行中提问都读取同一个 stdin。若每个模块�
 
 ui.ts 懒初始化唯一的 readline 实例，并通过 ask 与 closeUI 暴露输入和关闭能力。导入模块本身不打开输入流；main 在 finally 统一关闭。
 
+输入流关闭时，ask 用 InputClosedError 拒绝等待，而不是留下未解决的 Promise 让进程直接退出。CLI 在 REPL 输入处捕获并正常收尾，确保会话锁释放；批准或工具提问处 EOF 沿用工具错误语义，不当作用户同意。[交付契约](../process/2026-09-22-cli-delivery.md)定义正常退出与取消的进程码。
+
 Ctrl+C 经 CLI 生命周期信号中止当前等待并转为取消退出；轮内批准和 ask_user 接收本轮共享信号，包含[总时限](2026-09-22-runtime-resilience.md)。主轮保留已确认动作与结果不确定记录，不回退删除历史。批准框和 ask_user 都复用这个输入入口；[动作批准](../feature/2026-09-02-action-approval-scope.md)与[显式出口](../feature/2026-09-11-explicit-turn-exits.md)使用各自的控制语义。
 
 ## Alternatives considered
@@ -29,3 +31,5 @@ Ctrl+C 经 CLI 生命周期信号中止当前等待并转为取消退出；轮�
 ## Verification
 
 日期依据：[f8e6831](https://github.com/xilele777/mini-agent/commit/f8e6831) 于 2026-09-02 引入 ui.ts 和批准流程；ask_user 后续复用。当前依据：[ui.ts](../../../../src/ui.ts)、[agent.ts](../../../../src/agent.ts)、[turn.ts](../../../../src/turn.ts)、[approval.ts](../../../../src/approval.ts) 和 [control.ts](../../../../src/tools/control.ts)。已有交接包含 exit、quit 和 Ctrl+C 的手动记录；自动化测试不覆盖终端竞争。
+
+阶段 15 的 [cli.test.ts](../../../../src/cli.test.ts)实际启动子进程，等待 REPL 后关闭 stdin，再打开同一个会话验证锁已释放。阶段 14 的 run-control 测试覆盖 readline 等待取消；原生 Ctrl+C 交互仍保留人工验收。

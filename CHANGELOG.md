@@ -5,7 +5,28 @@
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-09-06
+## [1.1.0] - 2026-09-22
+
+### 新增
+
+- 流式工具调用组装、显式完成与暂停、同步只读子 Agent。
+- 集中配置与 doctor；项目绑定会话、原子快照、动作检查点、恢复不重放。
+- 每请求上下文预算、持久化增量摘要、精确文件编辑与冲突检查。
+- 贯穿取消、命令进程树清理、有限传输重试、整轮预算与脱敏 JSONL 轨迹。
+- 正式 CLI 帮助、版本、诊断入口及退出码；Node 编译产物与本地 npm tarball 安装。
+- CLI 与干净安装回归、Windows/Ubuntu CI，以及固定缺陷任务。
+
+### 修复
+
+- 关闭 REPL 输入流时显式结束等待，确保会话锁经过 finally 释放。
+
+### 变更
+
+- README 面向安装与使用；开发说明移至 CONTRIBUTING，内部学习和评测记录集中在 `.agents/`，不进入发行包。
+- `write_file` 只负责新建文件；修改已有文件使用带指纹检查和逐次批准的 `edit_file`。
+- Windows 显式配置 Git Bash 路径，模型连接统一从 `.env` 或环境变量读取。
+
+## 1.0.0 - 2026-09-06
 
 首个公开版本,具备本地命令行 AI Agent 的完整骨架。
 
@@ -35,5 +56,5 @@
 
 - 命令行动手验证(dev)与自动化测试并存,主循环与真实工具执行仍以手工验收为准。
 
-[Unreleased]: https://github.com/xilele777/mini-agent/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/xilele777/mini-agent/releases/tag/v1.0.0
+[Unreleased]: https://github.com/xilele777/mini-agent/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/xilele777/mini-agent/releases/tag/v1.1.0

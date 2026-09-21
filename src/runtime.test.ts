@@ -306,3 +306,16 @@ test('外部取消中止实际模型适配器的流，不误报为请求超时',
     for await (const _ of stream) { /* 消费至取消 */ }
   }, { name: 'AbortError' })
 })
+
+test('统一 doctor 的在线探针接受取消，不转成普通诊断失败', async () => {
+  const controller = new AbortController()
+  const result = checkModel(testConfig, async (_input, init) => {
+    return new Response(new ReadableStream({
+      start(stream) {
+        init?.signal?.addEventListener('abort', () => stream.error(new DOMException('cancelled', 'AbortError')), { once: true })
+        setTimeout(() => controller.abort(), 20)
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } })
+  }, controller.signal)
+  await assert.rejects(result, { name: 'AbortError' })
+})

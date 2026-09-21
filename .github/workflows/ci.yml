@@ -27,3 +27,4 @@ jobs:
       - run: npm run verify-notes
       - run: npm run test:board
       - run: npm run test:fixture
+      - run: npm run test:delivery

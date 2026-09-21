@@ -13,3 +13,6 @@ commit-msg.txt
 .mini-agent/
 
 /board.html
+
+/dist/
+/*.tgz

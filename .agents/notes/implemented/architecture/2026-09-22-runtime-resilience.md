@@ -37,4 +37,4 @@ Status: implemented
 
 2026-09-22，本地 `npm run typecheck` 与全量 178 项测试通过，零失败／跳过；其中 [run-control.test.ts](../../../../src/run-control.test.ts) 新增十八项，`npm run test:resilience` 可独立重跑。覆盖传输重试计数、actual/estimated 结算、token 零请求拒绝及服务端超额、部分流与协议／认证不重试、动作不重放、退避取消、批准总时限、started 窗口取消、runtime 委派共享预算、SDK 真实适配器与故障 fetch、实际会话摘要耗尽、真实 readline 输入／批准／ask_user 取消、轨迹白名单／写失败及会话恢复。
 
-同次全量测试包含实际 Windows Git Bash 子孙进程清理与固定运费任务修复回归。故障注入通过不代表已调用真实模型服务；阶段 14 的真实模型及 Ctrl+C 人工验收由学习者执行，步骤见 [README](../../../../README.md)。
+同次全量测试包含实际 Windows Git Bash 子孙进程清理与固定运费任务修复回归。故障注入通过不代表已调用真实模型服务；阶段 14 的真实模型及 Ctrl+C 人工验收由学习者执行，步骤见[内部评测记录](../../../learning/evaluation.md#阶段-14-人工验收)。

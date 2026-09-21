@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import OpenAI from 'openai'
-import type { AppConfig } from './config.js'
+import { loadConfig, type AppConfig } from './config.js'
 import { createModelStream, ModelTimeoutError } from './llm.js'
 import { collectResponse } from './stream.js'
 
@@ -10,6 +10,26 @@ const execFileAsync = promisify(execFile)
 export interface CheckResult {
   ok: boolean
   message: string
+}
+
+/** 两个 CLI 入口共用诊断行为；仅显式调用时读取环境。 */
+export async function runDoctor(online: boolean, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
+  const config = loadConfig(process.env, process.platform)
+  console.log('[OK] 配置格式通过；密钥和原始配置值不显示。')
+  const report = (result: CheckResult) => {
+    console.log(`[${result.ok ? 'OK' : 'FAIL'}] ${result.message}`)
+    if (!result.ok) process.exitCode = 1
+  }
+  const shell = await checkShell(config, signal)
+  signal?.throwIfAborted()
+  report(shell)
+  if (online) {
+    console.log('[检查] 将发起一次模型流式请求，可能产生费用。')
+    report(await checkModel(config, fetch, signal))
+  } else {
+    console.log('[SKIP] 尚未检查模型连接；使用 --online 运行在线探针。')
+  }
 }
 
 /** 不输出错误对象或服务端响应正文。 */
@@ -46,7 +66,8 @@ export function describeAPIError(error: unknown): string {
 }
 
 export async function checkShell(
-  config: AppConfig
+  config: AppConfig,
+  signal?: AbortSignal
 ): Promise<CheckResult> {
   try {
     // Windows 使用 Git Bash，Linux 使用 sh/bash。
@@ -57,6 +78,7 @@ export async function checkShell(
         timeout: Math.min(config.commandTimeoutMs, 5000),
         maxBuffer: 4096,
         windowsHide: true,
+        ...(signal ? { signal } : {}),
       }
     )
 
@@ -78,12 +100,14 @@ export async function checkShell(
 
 export async function checkModel(
   config: AppConfig,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal
 ): Promise<CheckResult> {
   try {
     const createStream = createModelStream(config, fetcher)
 
     const stream = await createStream({
+      ...(signal ? { signal } : {}),
       messages: [{
         role: 'user',
         content: 'Call doctor_echo with value="ok".',
@@ -141,6 +165,7 @@ export async function checkModel(
       message: '模型流式响应、工具调用和参数组装通过；没有执行工具。',
     }
   } catch (error) {
+    signal?.throwIfAborted()
     return {
       ok: false,
       message: describeAPIError(error),

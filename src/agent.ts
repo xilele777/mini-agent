@@ -1,7 +1,9 @@
 import 'dotenv/config'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { ask, closeUI, setInterruptHandler } from './ui.js'
+import { ask, closeUI, InputClosedError, setInterruptHandler } from './ui.js'
+import { help, parseArgs, UsageError, version } from './cli.js'
+import { runDoctor } from './doctor.js'
 import { ConfigError, loadConfig } from './config.js'
 import { createRuntime } from './runtime.js'
 import {
@@ -26,10 +28,15 @@ async function main() {
   setInterruptHandler(cancel)
 
   try {
-    const args = process.argv.slice(2)
+    const command = parseArgs(process.argv.slice(2))
+    if (command.kind === 'help') { console.log(help); return }
+    if (command.kind === 'version') { console.log(version); return }
+    if (command.kind === 'doctor') { await runDoctor(command.online, controller.signal); return }
 
-    if (args.length === 1 && args[0] === '--sessions') {
-      for (const row of await listSessions(process.cwd())) {
+    if (command.kind === 'sessions') {
+      const rows = await listSessions(process.cwd())
+      if (!rows.length) console.log('当前项目没有会话。')
+      for (const row of rows) {
         console.log(row.ok
           ? `${row.id}  消息 ${row.messageCount} / 待办 ${row.todoCount}`
           : `${row.id}  无法打开：${row.error}`)
@@ -37,19 +44,11 @@ async function main() {
       return
     }
 
-    const resume = args.length === 2 && args[0] === '--resume'
-      ? args[1]
-      : undefined
-
-    if (args.length && !resume) {
-      throw new Error('用法：npm run dev -- [--sessions | --resume UUID]')
-    }
-
     // 先校验配置；配置错误不创建会话文件。
     const config = loadConfig(process.env, process.platform)
 
-    session = resume
-      ? await openSession(process.cwd(), resume)
+    session = command.kind === 'resume'
+      ? await openSession(process.cwd(), command.id)
       : await createSession(process.cwd())
 
     clearApprovals()
@@ -83,9 +82,18 @@ async function main() {
 
       console.log(`[本轮 ${result.status}] ${result.reason}`)
 
-      if (result.status === 'cancelled') break
+      if (result.status === 'cancelled') {
+        process.exitCode = 130
+        break
+      }
     }
   } catch (error) {
+    if (error instanceof InputClosedError) return
+    if (error instanceof UsageError) {
+      console.error(error.message)
+      process.exitCode = 2
+      return
+    }
     if (
       error instanceof Error &&
       (
@@ -94,6 +102,7 @@ async function main() {
       )
     ) {
       console.log('已取消。')
+      process.exitCode = 130
       return
     }
 

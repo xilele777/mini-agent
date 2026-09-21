@@ -22,17 +22,17 @@
     "nodes": [
       {
         "id": "input", "title": "用户输入", "caption": "新指令开启一轮",
-        "behavior": ["先裁剪旧历史，再把新输入加入对话，标记为真实用户轮。", "一轮完成或暂停后，终端继续等待你的下一条指令。"],
+        "behavior": ["从当前目录新建或恢复会话，等待新指令；恢复不重放旧调用。","新输入开启真实用户轮，创建共享取消信号和预算账目；完成或暂停后继续等待。"],
         "boundary": "执行中的提问和系统内部的继续提示，仍属于原来这一轮。",
         "notes": ["implemented/architecture/2026-09-11-user-turn-boundaries.md", "implemented/architecture/2026-09-02-shared-terminal-input.md"],
-        "sources": [{ "label": "agent.ts · main", "path": "../src/agent.ts" }, { "label": "ui.ts · ask", "path": "../src/ui.ts" }]
+        "sources": [{"label":"agent.ts · main","path":"../src/agent.ts"},{"label":"session-runner.ts · 轮入口","path":"../src/session-runner.ts"}]
       },
       {
         "id": "model", "title": "模型调用", "caption": "读取上下文，选择动作",
-        "behavior": ["把对话历史和工具说明一起发给模型，逐片显示文本并将 Function Calling 片段组装成完整消息。", "只有文字回复时，追加继续提示，引导它执行、提问、完成或暂停。"],
-        "boundary": "模型可能判断错误。每个真实用户轮最多请求十次模型，重复调用另有守卫。",
+        "behavior": ["把对话历史和工具说明一起发给模型，逐片显示文本并将 Function Calling 片段组装成完整消息。","只有文字回复时，追加继续提示，引导它执行、提问、完成或暂停。"],
+        "boundary": "模型可能判断错误。主轮、子任务有局部次数上限，所有实际请求、摘要和重试还共享整轮次数、token 与时间预算。",
         "notes": ["implemented/architecture/2026-08-31-native-function-calling.md", "implemented/feature/2026-09-13-streamed-model-response.md", "implemented/feature/2026-09-05-loop-guard-and-request-budget.md", "implemented/simplification/2026-08-31-remove-handwritten-react-parser.md"],
-        "sources": [{ "label": "turn.ts · runTurn", "path": "../src/turn.ts" }, { "label": "stream.ts · 流组装", "path": "../src/stream.ts" }, { "label": "llm.ts · 模型连接", "path": "../src/llm.ts" }]
+        "sources": [{"label":"turn.ts · runTurn","path":"../src/turn.ts"},{"label":"stream.ts · 流组装","path":"../src/stream.ts"},{"label":"llm.ts · 模型连接","path":"../src/llm.ts"}]
       },
       {
         "id": "tools", "title": "工具执行", "caption": "校验 → 按需批准 → 执行",
@@ -43,24 +43,24 @@
       },
       {
         "id": "result", "title": "结果回填", "caption": "成功、拒绝、错误都回填",
-        "behavior": ["每次工具调用都配上相同 ID 的结果；过长的结果先截断，再写入历史。", "提前结束时，同批剩余调用补上“未执行”；异常时回滚本轮对话消息。"],
-        "boundary": "回滚消息不会撤销已经发生的文件写入、命令执行或待办变更。",
+        "behavior": ["每次工具调用配上相同 ID 的结果，保存动作检查点。","提前结束时补齐未执行结果；异常保留已确认动作和不确定记录，恢复不自动重放。"],
+        "boundary": "会话保存与动作副作用不是同一事务；结果不确定时需要人工核查。",
         "notes": ["implemented/bug-fix/2026-09-06-tool-result-history-recovery.md", "implemented/architecture/2026-09-05-bounded-conversation-context.md"],
-        "sources": [{ "label": "turn.ts · 结果回填", "path": "../src/turn.ts" }, { "label": "context.ts · truncateToolResult", "path": "../src/context.ts" }]
+        "sources": [{"label":"turn.ts · 结果回填","path":"../src/turn.ts"},{"label":"context.ts · truncateToolResult","path":"../src/context.ts"}]
       },
       {
-        "id": "context", "title": "对话上下文", "caption": "按完整用户轮保留历史",
-        "behavior": ["新请求前按真实用户轮裁剪旧历史；内部继续提示不会被误算成新的一轮。", "发送给模型时去掉本地的轮次标记，保留标准消息结构。"],
-        "boundary": "固定轮数不能保证固定 token 上限；对话消息也不会跨进程恢复。",
+        "id": "context", "title": "对话上下文", "caption": "预算裁剪与持久化摘要",
+        "behavior": ["每次请求前估算窗口，按完整旧轮裁剪；超限时尝试一次有界摘要。","原始历史保存在会话，模型仅接收派生视图；摘要保存覆盖范围与原文指纹。"],
+        "boundary": "摘要有损，不能构成新授权；本地估算不等于服务端精确 token。",
         "notes": ["implemented/architecture/2026-09-05-bounded-conversation-context.md", "implemented/architecture/2026-09-11-user-turn-boundaries.md"],
-        "sources": [{ "label": "context.ts · trimHistory", "path": "../src/context.ts" }]
+        "sources": [{"label":"context-budget.ts · 请求预算","path":"../src/context-budget.ts"},{"label":"compaction.ts · 摘要","path":"../src/compaction.ts"}]
       },
       {
-        "id": "todos", "title": "待办计划", "caption": "JSON 保存，启动时恢复",
-        "behavior": ["由 todo 模块维护运行中的状态，修改后写入项目内的 JSON 文件。", "启动时通过注册表恢复清单，再开始接收用户请求。"],
-        "boundary": "清单只保存计划；暂停状态、任务归属和多进程写入协调尚未实现。",
+        "id": "todos", "title": "待办计划", "caption": "随会话原子保存",
+        "behavior": ["todo 由当前会话句柄持有，更新草稿后写入原子快照。","重开会话恢复清单，不同会话独立，独占锁防止并发覆盖。"],
+        "boundary": "清单是计划，不等于任务已执行；崩溃遗留锁需人工确认原进程退出后处理。",
         "notes": ["implemented/architecture/2026-09-06-todo-json-persistence.md", "implemented/architecture/2026-09-10-todo-state-ownership.md"],
-        "sources": [{ "label": "tools/todo.ts · 待办状态", "path": "../src/tools/todo.ts" }]
+        "sources": [{"label":"tools/todo.ts · 待办状态","path":"../src/tools/todo.ts"}]
       },
       {
         "id": "delegation", "title": "子 Agent 委派", "caption": "独立上下文，只读调查",
@@ -85,10 +85,10 @@
       },
       {
         "id": "pause", "title": "暂停", "caption": "尚未完成",
-        "behavior": ["pause_task 通过结束标记停止本轮，等待你给出新的指令。", "提示词要求旧任务在明确恢复后继续，暂停不会自动删除待办。"],
-        "boundary": "暂停原因只保留在对话中；当前没有持久化的暂停状态或任务隔离。",
+        "behavior": ["pause_task 通过结束标记停止本轮，等待你给出新的指令。","提示词要求旧任务在明确恢复后继续，暂停不会自动删除待办。"],
+        "boundary": "暂停状态及原因随轮记录持久化；恢复等待新指令，不自动执行未完成任务。",
         "notes": ["implemented/feature/2026-09-11-explicit-turn-exits.md", "implemented/architecture/2026-09-06-todo-json-persistence.md"],
-        "sources": [{ "label": "tools/control.ts · pause_task", "path": "../src/tools/control.ts" }]
+        "sources": [{"label":"tools/control.ts · pause_task","path":"../src/tools/control.ts"}]
       }
     ]
   },
@@ -177,6 +177,8 @@
       "notes": [
         { "id": "implemented/process/2026-09-11-learning-workflow-and-notes.md", "label": "分开维护教练方法与项目资料" },
         { "id": "implemented/testing/2026-09-05-verification-scope.md", "label": "明确测试的覆盖范围" },
+        { "id": "implemented/process/2026-09-22-cli-delivery.md", "label": "编译交付、CLI 契约与安装验收" },
+        { "id": "implemented/testing/2026-09-21-repeatable-fixture-and-ci.md", "label": "固定任务、无密钥回归与独立验收" },
         { "id": "implemented/process/2026-09-11-complete-board-sections.md", "label": "完整保留决策与验证依据" },
         { "id": "implemented/process/2026-09-12-readable-board-and-stable-sync.md", "label": "独立维护看板，按变化同步" }
       ]
