@@ -28,4 +28,4 @@ Status: implemented
 
 ## Verification
 
-日期依据：[8f4f148](https://github.com/xilele777/mini-agent/commit/8f4f148) 于 2026-08-31 接入 tool_calls。当前实现见 [agent.ts](../../../../src/agent.ts) 与 [tools/index.ts](../../../../src/tools/index.ts)。本次依据代码和 Git 记录整理，不新增真实模型运行证据。
+日期依据：[8f4f148](https://github.com/xilele777/mini-agent/commit/8f4f148) 于 2026-08-31 接入 tool_calls。当前实现见 [turn.ts](../../../../src/turn.ts)、[stream.ts](../../../../src/stream.ts) 与 [tools/index.ts](../../../../src/tools/index.ts)。2026-09-20 的普通计算与委派请求继续使用原生 tool_calls 完成真实模型验收。

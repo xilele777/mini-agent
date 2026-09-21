@@ -28,4 +28,4 @@ Status: implemented
 
 ## Verification
 
-日期依据：[7b29af1](https://github.com/xilele777/mini-agent/commit/7b29af1) 于 2026-09-05 引入守卫，后续调整终止配对及请求出口。当前依据：[context.ts](../../../../src/context.ts)、[agent.ts](../../../../src/agent.ts)。已有五条判重测试覆盖阈值与参数变化；累计命中、中断剩余调用及纯文本预算仍需主循环用例。
+日期依据：[7b29af1](https://github.com/xilele777/mini-agent/commit/7b29af1) 于 2026-09-05 引入守卫，后续调整终止配对及请求出口。当前依据：[context.ts](../../../../src/context.ts)、[turn.ts](../../../../src/turn.ts) 和 [turn.test.ts](../../../../src/turn.test.ts)。五条判重测试覆盖阈值与参数变化；主轮测试覆盖累计两次命中、中断剩余调用及纯文本耗尽请求预算。

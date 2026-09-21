@@ -30,4 +30,4 @@ shell 工具自身还有输出截断，公共层看到的结果可能已丢失�
 
 ## Verification
 
-日期依据：[7b29af1](https://github.com/xilele777/mini-agent/commit/7b29af1) 于 2026-09-05 引入上下文管理。当前依据：[context.ts](../../../../src/context.ts)、[context.test.ts](../../../../src/context.test.ts)、[agent.ts](../../../../src/agent.ts)。测试覆盖头尾截断及整轮保留，无法证明任意输入均不超服务端上下文限额。
+日期依据：[7b29af1](https://github.com/xilele777/mini-agent/commit/7b29af1) 于 2026-09-05 引入上下文管理。当前依据：[context.ts](../../../../src/context.ts)、[context.test.ts](../../../../src/context.test.ts)、[agent.ts](../../../../src/agent.ts)、[turn.ts](../../../../src/turn.ts) 和 [turn.test.ts](../../../../src/turn.test.ts)。测试覆盖头尾截断、整轮保留和内部继续提示不增加真实用户轮，仍无法证明任意输入均不超服务端上下文限额。

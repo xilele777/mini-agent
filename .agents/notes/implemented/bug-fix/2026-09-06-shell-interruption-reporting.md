@@ -26,7 +26,7 @@ ERR_CHILD_PROCESS_STDIO_MAXBUFFER 先于数字退出码分支识别，返回中�
 
 模型能区分多类结果并看到部分输出，代价是输出可能不完整、进程终止也不保证撤销副作用或终止所有后代进程。
 
-当前超时分支依据 killed 报告并未附带已捕获输出；缓冲超限说明中的“已超时”标签也不构成实际超时证据。Windows shell 路径固定为本机 Git Bash，换机须核对。
+当前超时分支依据 killed 报告并未附带已捕获输出；缓冲超限说明中的“已超时”标签也不构成实际超时证据。shell 路径与命令超时由启动配置注入 `createBashTool()`，Windows 需显式配置 Git Bash，换机仍须通过 doctor 核对。
 
 ## Verification
 

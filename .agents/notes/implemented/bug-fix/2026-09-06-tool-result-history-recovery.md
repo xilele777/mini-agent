@@ -30,4 +30,4 @@ assistant 一次可能提出多个工具调用。中途拒绝、守卫终止或�
 
 ## Verification
 
-日期依据：[ad92001](https://github.com/xilele777/mini-agent/commit/ad92001) 于 2026-09-06 补齐循环终止路径；[cd3fa0c](https://github.com/xilele777/mini-agent/commit/cd3fa0c) 包含显式出口路径。当前依据：[agent.ts](../../../../src/agent.ts)。现有测试覆盖历史裁剪，不包含“同批结束工具后还有其他调用”的运行用例；该分支只有静态 review 证据。
+日期依据：[ad92001](https://github.com/xilele777/mini-agent/commit/ad92001) 于 2026-09-06 补齐循环终止路径；[cd3fa0c](https://github.com/xilele777/mini-agent/commit/cd3fa0c) 包含显式出口路径。当前依据：[turn.ts](../../../../src/turn.ts)、[turn.test.ts](../../../../src/turn.test.ts) 和 [agent.ts](../../../../src/agent.ts)。主轮测试已覆盖 `finish_task` 后同批剩余调用补“未执行”结果，以及循环守卫中止时补齐当前及剩余调用。

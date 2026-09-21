@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-原来的 `runTurn()` 等待完整模型响应后才显示文本。改为流式请求后，文本可以即时到达，但工具调用的 ID、名称和参数可能分散在多个片段中；不完整响应不能直接写入历史或进入工具执行流程。当前主轮入口见 [agent.ts](../../../../src/agent.ts)。
+原来的 `runTurn()` 等待完整模型响应后才显示文本。改为流式请求后，文本可以即时到达，但工具调用的 ID、名称和参数可能分散在多个片段中；不完整响应不能直接写入历史或进入工具执行流程。当前主轮入口见 [turn.ts](../../../../src/turn.ts)。
 
 ## Decision
 
@@ -34,6 +34,6 @@ Status: implemented
 
 2026-09-13，参考实现曾在隔离临时文件中通过 TypeScript 检查和十三项模拟流测试，覆盖文本、拒绝文本、尾部 usage、同名调用交错与排序、名称分片、请求隔离、异常传播、结束状态、ID 与编号校验、不支持类型及非法参数原文保留。
 
-2026-09-19，学习者将实现接入当时位于 `agent.ts` 的主循环，真实模型在同一次响应中组装并执行 `current_time` 与 `calculate`，随后调用 `finish_task`；另一个用例拒绝 `run_bash` 后调用 `pause_task`，没有重试或绕过。两次路径均收到 usage，文本没有重复打印。
+2026-09-19，学习者将实现接入当时位于 `agent.ts` 的主循环，真实模型在同一次响应中组装并执行 `current_time` 与 `calculate`，随后调用 `finish_task`；另一个用例拒绝 `run_bash` 后调用 `pause_task`，没有重试或绕过。两次路径均收到 usage，文本没有重复打印。2026-09-20，主循环迁移到 [turn.ts](../../../../src/turn.ts)，新增的主轮模拟测试与普通请求、委派请求真实验收继续覆盖该流式路径。
 
 十三项模拟场景已固化为 [stream.test.ts](../../../../src/stream.test.ts) 并加入 [package.json](../../../../package.json) 的全量测试。删除三个练习脚本后，学习者运行 `npm run typecheck` 通过，`npm test` 三十四条通过、零失败。

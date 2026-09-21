@@ -30,4 +30,4 @@ trimHistory 按标记选择完整轮次。发送请求时，toModelMessages 产�
 
 ## Verification
 
-日期依据：[cd3fa0c](https://github.com/xilele777/mini-agent/commit/cd3fa0c) 于 2026-09-11 接入并验证。当前依据：[context.ts](../../../../src/context.ts)、[agent.ts](../../../../src/agent.ts)。[context.test.ts](../../../../src/context.test.ts) 的三个相关用例覆盖内部提示不增加轮数、保留六个完整轮、API 消息去标记且保留原数组。
+日期依据：[cd3fa0c](https://github.com/xilele777/mini-agent/commit/cd3fa0c) 于 2026-09-11 接入并验证。当前依据：[context.ts](../../../../src/context.ts)、[agent.ts](../../../../src/agent.ts)、[turn.ts](../../../../src/turn.ts) 和 [turn.test.ts](../../../../src/turn.test.ts)。上下文测试覆盖整轮裁剪和 API 消息去标记；主轮测试确认持续纯文本追加的内部提示不产生新的 `startsTurn`。

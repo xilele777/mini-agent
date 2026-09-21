@@ -30,4 +30,4 @@ finish_task 表示当前请求完成，pause_task 表示未完成但需要暂停
 
 ## Verification
 
-日期依据：[cd3fa0c](https://github.com/xilele777/mini-agent/commit/cd3fa0c) 于 2026-09-11 落地。当前依据：[control.ts](../../../../src/tools/control.ts)、[agent.ts](../../../../src/agent.ts)。[学习进度](../../../learning/progress.md) 保留只记录待办、询问中拒绝、批准框拒绝及 nudge 后完成的具体记录；其覆盖范围不能推广到所有模型行为。
+日期依据：[cd3fa0c](https://github.com/xilele777/mini-agent/commit/cd3fa0c) 于 2026-09-11 落地。当前依据：[control.ts](../../../../src/tools/control.ts)、[turn.ts](../../../../src/turn.ts) 和 [turn.test.ts](../../../../src/turn.test.ts)。[学习进度](../../../learning/progress.md) 保留只记录待办、询问中拒绝、批准框拒绝及 nudge 后完成的具体记录；主轮测试另覆盖结束工具后同批调用的配对，其范围仍不能推广到所有模型行为。

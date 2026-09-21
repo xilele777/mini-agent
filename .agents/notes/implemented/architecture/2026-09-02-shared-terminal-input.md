@@ -28,4 +28,4 @@ Ctrl+C 的 AbortError 向外层传播并转为取消退出，普通本轮错误�
 
 ## Verification
 
-日期依据：[f8e6831](https://github.com/xilele777/mini-agent/commit/f8e6831) 于 2026-09-02 引入 ui.ts 和批准流程；ask_user 后续复用。当前依据：[ui.ts](../../../../src/ui.ts)、[agent.ts](../../../../src/agent.ts)、[control.ts](../../../../src/tools/control.ts)。已有交接包含 exit、quit 和 Ctrl+C 的手动记录；自动化测试不覆盖终端竞争。
+日期依据：[f8e6831](https://github.com/xilele777/mini-agent/commit/f8e6831) 于 2026-09-02 引入 ui.ts 和批准流程；ask_user 后续复用。当前依据：[ui.ts](../../../../src/ui.ts)、[agent.ts](../../../../src/agent.ts)、[turn.ts](../../../../src/turn.ts)、[approval.ts](../../../../src/approval.ts) 和 [control.ts](../../../../src/tools/control.ts)。已有交接包含 exit、quit 和 Ctrl+C 的手动记录；自动化测试不覆盖终端竞争。
