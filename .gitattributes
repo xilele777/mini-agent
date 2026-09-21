@@ -1,6 +1,14 @@
 # Treat project collaboration files as documentation in GitHub language statistics.
 /.agents/** linguist-documentation
 
+# Generated documentation snapshots are not application source.
+/board.html linguist-generated
+/board.snapshot.html linguist-generated
+
+# The notes viewer and its generator belong to project documentation.
+/scripts/notes-board/** linguist-documentation
+/scripts/build-notes-board.mjs linguist-documentation
+
 # Upstream note validation expects LF-delimited headers.
 /AGENTS.md text eol=lf
 /.agents/README.md text eol=lf
