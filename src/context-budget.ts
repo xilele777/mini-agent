@@ -3,11 +3,7 @@ import type {
   ChatCompletionFunctionTool,
   ChatCompletionMessageParam,
 } from 'openai/resources/chat/completions'
-import {
-  toModelMessages,
-  truncateToolResult,
-  type HistoryMessage,
-} from './context.js'
+import { toModelMessages, truncateToolResult, type HistoryMessage } from './context.js'
 
 // Note: 请求视图的预算与整轮裁剪 — 见 .agents/notes/implemented/architecture/2026-09-05-bounded-conversation-context.md
 
@@ -28,10 +24,7 @@ export type ContextPlan = {
   estimatedInputTokens: number
   inputLimit: number
   droppedTurns: number
-} & (
-  | { ok: true; messages: ChatCompletionMessageParam[] }
-  | { ok: false; reason: string }
-)
+} & ({ ok: true; messages: ChatCompletionMessageParam[] } | { ok: false; reason: string })
 
 /** 文本 CLI 的保守估算；不是服务端 tokenizer 的精确结果。 */
 export function estimateInputTokens(
@@ -44,10 +37,7 @@ export function estimateInputTokens(
     }
   }
 
-  const bytes = Buffer.byteLength(
-    JSON.stringify({ messages, tools }),
-    'utf8'
-  )
+  const bytes = Buffer.byteLength(JSON.stringify({ messages, tools }), 'utf8')
 
   // 用 UTF-8 字节数粗估，并给消息包装和工具包装留出余量。
   return bytes + messages.length * 16 + tools.length * 16 + 64
@@ -65,9 +55,12 @@ export function buildContext(
   const { contextWindow, outputReserve, safetyMargin } = budget
 
   if (
-    !Number.isSafeInteger(contextWindow) || contextWindow <= 0 ||
-    !Number.isSafeInteger(outputReserve) || outputReserve <= 0 ||
-    !Number.isSafeInteger(safetyMargin) || safetyMargin < 0 ||
+    !Number.isSafeInteger(contextWindow) ||
+    contextWindow <= 0 ||
+    !Number.isSafeInteger(outputReserve) ||
+    outputReserve <= 0 ||
+    !Number.isSafeInteger(safetyMargin) ||
+    safetyMargin < 0 ||
     outputReserve >= contextWindow ||
     safetyMargin >= contextWindow - outputReserve
   ) {
@@ -88,17 +81,13 @@ export function buildContext(
       starts.push(i)
     }
 
-    if (
-      starts.length > 0 &&
-      (message.role === 'system' || message.role === 'developer')
-    ) {
+    if (starts.length > 0 && (message.role === 'system' || message.role === 'developer')) {
       throw new Error('system/developer 必须位于首个用户轮之前')
     }
   }
 
-  const projected = structuredClone(toModelMessages(history)).map(
-    (message) => message.role === 'tool' &&
-      typeof message.content === 'string'
+  const projected = structuredClone(toModelMessages(history)).map((message) =>
+    message.role === 'tool' && typeof message.content === 'string'
       ? { ...message, content: truncateToolResult(message.content) }
       : message
   )
@@ -122,7 +111,8 @@ export function buildContext(
       return {
         ok: false,
         ...stats,
-        reason: `上下文估算 ${estimatedInputTokens} 超过输入预算 ${inputLimit}；` +
+        reason:
+          `上下文估算 ${estimatedInputTokens} 超过输入预算 ${inputLimit}；` +
           '已无法继续删除完整旧轮，请缩小输入、任务范围或工具集合。',
       }
     }

@@ -4,9 +4,7 @@ import type { Tool, ExecutionContext } from './types.js'
 
 // Note: 工具集合同时约束 schema 与调用准备 — 见 .agents/notes/implemented/architecture/2026-08-31-tool-registry-boundary.md
 
-export type PreparedCall =
-  | { ok: true; tool: Tool; args: unknown }
-  | { ok: false; error: string }
+export type PreparedCall = { ok: true; tool: Tool; args: unknown } | { ok: false; error: string }
 
 export interface ToolRegistry {
   getToolSchemas(): ChatCompletionFunctionTool[]
@@ -17,9 +15,7 @@ export interface ToolRegistry {
  * 从一组明确给出的工具创建能力集合。
  * schema 暴露和调用准备共用同一张表，未注册工具不能进入执行流程。
  */
-export function createToolRegistry(
-  tools: readonly Tool[]
-): ToolRegistry {
+export function createToolRegistry(tools: readonly Tool[]): ToolRegistry {
   const registry = new Map<string, Tool>()
 
   for (const tool of tools) {
@@ -41,10 +37,7 @@ export function createToolRegistry(
     }))
   }
 
-  function prepareCall(
-    name: string,
-    rawArgs: string
-  ): PreparedCall {
+  function prepareCall(name: string, rawArgs: string): PreparedCall {
     const tool = registry.get(name)
 
     if (!tool) {
@@ -52,9 +45,7 @@ export function createToolRegistry(
 
       return {
         ok: false,
-        error:
-          `错误:不存在名为 "${name}" 的工具。` +
-          `可用工具只有:${available || '无'}`,
+        error: `错误:不存在名为 "${name}" 的工具。` + `可用工具只有:${available || '无'}`,
       }
     }
 
@@ -65,9 +56,7 @@ export function createToolRegistry(
     } catch {
       return {
         ok: false,
-        error:
-          `错误:工具 "${name}" 的参数不是合法的 JSON。` +
-          `收到的是:${rawArgs}`,
+        error: `错误:工具 "${name}" 的参数不是合法的 JSON。` + `收到的是:${rawArgs}`,
       }
     }
 
@@ -83,9 +72,7 @@ export function createToolRegistry(
 
       return {
         ok: false,
-        error:
-          `错误:工具 "${name}" 的参数不合法 —— ${detail}。` +
-          `收到的参数是:${rawArgs}`,
+        error: `错误:工具 "${name}" 的参数不合法 —— ${detail}。` + `收到的参数是:${rawArgs}`,
       }
     }
 
@@ -106,7 +93,7 @@ export function createToolRegistry(
 export async function executeCall(
   tool: Tool,
   args: unknown,
-  context?: ExecutionContext,
+  context?: ExecutionContext
 ): Promise<string> {
   try {
     context?.signal?.throwIfAborted()
@@ -115,7 +102,8 @@ export async function executeCall(
     return result
   } catch (error) {
     context?.signal?.throwIfAborted()
-    if (error instanceof Error && (error.name === 'AbortError' || error.name === 'RunBudgetError')) throw error
+    if (error instanceof Error && (error.name === 'AbortError' || error.name === 'RunBudgetError'))
+      throw error
     return `错误:工具 "${tool.name}" 执行时抛出异常:${String(error)}`
   }
 }

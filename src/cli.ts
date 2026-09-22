@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 
 // Note: CLI 契约与编译交付 — 见 .agents/notes/implemented/process/2026-09-22-cli-delivery.md
-export const version = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version
+export const version = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+    version: string
+  }
+).version
 
 export const help = `mini-agent ${version}
 
@@ -34,10 +38,16 @@ export function parseArgs(args: readonly string[]): Command {
   if (!args.length) return { kind: 'new' }
   if (args.length === 1) {
     switch (args[0]) {
-      case '--help': case '-h': return { kind: 'help' }
-      case '--version': case '-v': return { kind: 'version' }
-      case '--sessions': return { kind: 'sessions' }
-      case '--doctor': return { kind: 'doctor', online: false }
+      case '--help':
+      case '-h':
+        return { kind: 'help' }
+      case '--version':
+      case '-v':
+        return { kind: 'version' }
+      case '--sessions':
+        return { kind: 'sessions' }
+      case '--doctor':
+        return { kind: 'doctor', online: false }
     }
   }
   if (args.length === 2 && args[0] === '--resume' && z.uuid().safeParse(args[1]).success) {

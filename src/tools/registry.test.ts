@@ -25,9 +25,7 @@ const hiddenTool: Tool = {
 test('注册表只暴露显式加入的工具', () => {
   const registry = createToolRegistry([echoTool])
 
-  const names = registry
-    .getToolSchemas()
-    .map((schema) => schema.function.name)
+  const names = registry.getToolSchemas().map((schema) => schema.function.name)
 
   assert.deepEqual(names, ['echo'])
 })
@@ -35,10 +33,7 @@ test('注册表只暴露显式加入的工具', () => {
 test('已注册工具使用自己的 schema 准备参数', () => {
   const registry = createToolRegistry([echoTool])
 
-  const prepared = registry.prepareCall(
-    'echo',
-    '{"text":"hello"}'
-  )
+  const prepared = registry.prepareCall('echo', '{"text":"hello"}')
 
   if (!prepared.ok) {
     assert.fail(prepared.error)
@@ -51,10 +46,7 @@ test('已注册工具使用自己的 schema 准备参数', () => {
 test('未加入能力集合的工具不能通过准备阶段', () => {
   const registry = createToolRegistry([echoTool])
 
-  const prepared = registry.prepareCall(
-    hiddenTool.name,
-    '{}'
-  )
+  const prepared = registry.prepareCall(hiddenTool.name, '{}')
 
   if (prepared.ok) {
     assert.fail('hidden 不应准备成功')
@@ -70,8 +62,5 @@ test('建立注册表时拒绝重复工具名', () => {
     name: 'echo',
   }
 
-  assert.throws(
-    () => createToolRegistry([echoTool, duplicate]),
-    /重复名称/
-  )
+  assert.throws(() => createToolRegistry([echoTool, duplicate]), /重复名称/)
 })

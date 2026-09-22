@@ -28,11 +28,13 @@ const budget = {
   safetyMargin: 72,
 }
 
-const task = (): HistoryMessage[] => [{
-  role: 'user',
-  content: '执行任务',
-  startsTurn: true,
-}]
+const task = (): HistoryMessage[] => [
+  {
+    role: 'user',
+    content: '执行任务',
+    startsTurn: true,
+  },
+]
 
 const work: Tool = {
   name: 'work',
@@ -49,28 +51,32 @@ const done: Tool = {
   endsTurn: 'completed',
 }
 
-async function* reply(
-  name?: string
-): AsyncGenerator<ChatCompletionChunk> {
+async function* reply(name?: string): AsyncGenerator<ChatCompletionChunk> {
   yield {
     id: 'test',
     object: 'chat.completion.chunk',
     created: 0,
     model: 'test',
-    choices: [{
-      index: 0,
-      finish_reason: name ? 'tool_calls' : 'stop',
-      delta: name ? {
-        tool_calls: [{
-          index: 0,
-          id: 'call-1',
-          type: 'function',
-          function: { name, arguments: '{}' },
-        }],
-      } : {
-        content: '完成调查',
+    choices: [
+      {
+        index: 0,
+        finish_reason: name ? 'tool_calls' : 'stop',
+        delta: name
+          ? {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call-1',
+                  type: 'function',
+                  function: { name, arguments: '{}' },
+                },
+              ],
+            }
+          : {
+              content: '完成调查',
+            },
       },
-    }],
+    ],
   }
 }
 
@@ -95,21 +101,20 @@ test('上下文配置支持覆盖并拒绝无效关系与参数名', () => {
     { MINI_AGENT_OUTPUT_RESERVE: '0' },
     { MINI_AGENT_OUTPUT_TOKEN_PARAM: 'unknown' },
   ]) {
-    assert.throws(
-      () => loadConfig({ ...env, ...override }, 'linux'),
-      ConfigError
-    )
+    assert.throws(() => loadConfig({ ...env, ...override }, 'linux'), ConfigError)
   }
 })
 
 test('主轮首次超限零请求，并保存 budget_exhausted', async () => {
   let requests = 0
   const events: TurnEvent[] = []
-  const messages: HistoryMessage[] = [{
-    role: 'user',
-    content: 'x'.repeat(5000),
-    startsTurn: true,
-  }]
+  const messages: HistoryMessage[] = [
+    {
+      role: 'user',
+      content: 'x'.repeat(5000),
+      startsTurn: true,
+    },
+  ]
 
   const result = await runTurn(messages, {
     ...quiet,
@@ -197,11 +202,7 @@ test('预算裁掉旧轮，重开会话仍保留完整原始历史', async () =>
     const reopened = await openSession(root, id)
 
     try {
-      assert.ok(
-        reopened.snapshot.messages.some(
-          (m) => m.content === 'x'.repeat(5000)
-        )
-      )
+      assert.ok(reopened.snapshot.messages.some((m) => m.content === 'x'.repeat(5000)))
       assert.equal(reopened.snapshot.turns.length, 2)
     } finally {
       await reopened.close()
@@ -238,9 +239,7 @@ test('子 Agent 最终总结仍检查预算，超限不额外请求', async () =
     createStream: async (request) => {
       requests++
       assert.equal(request.maxOutputTokens, 128)
-      assert.ok(
-        request.messages.every((m) => !('startsTurn' in m))
-      )
+      assert.ok(request.messages.every((m) => !('startsTurn' in m)))
       return reply('work')
     },
   })
@@ -252,35 +251,29 @@ test('子 Agent 最终总结仍检查预算，超限不额外请求', async () =
 test('runtime 把同一配置交给主轮与委派，最终总结携带输出上限', async () => {
   const contextBudget = { ...budget, outputReserve: 77 }
 
-  const runtime = createRuntime({
-    ...testConfig,
-    contextBudget,
-    subagentMaxIterations: 1,
-  }, async (request) => {
-    assert.equal(request.maxOutputTokens, 77)
-    assert.deepEqual(request.tools, [])
-    return reply()
-  })
+  const runtime = createRuntime(
+    {
+      ...testConfig,
+      contextBudget,
+      subagentMaxIterations: 1,
+    },
+    async (request) => {
+      assert.equal(request.maxOutputTokens, 77)
+      assert.deepEqual(request.tools, [])
+      return reply()
+    }
+  )
 
   assert.deepEqual(runtime.turnOptions.contextBudget, contextBudget)
 
-  const prepared = runtime.turnOptions.registry.prepareCall(
-    'delegate_task',
-    '{"task":"调查"}'
-  )
+  const prepared = runtime.turnOptions.registry.prepareCall('delegate_task', '{"task":"调查"}')
 
   assert.ok(prepared.ok)
-  assert.equal(
-    await prepared.tool.execute(prepared.args),
-    '完成调查'
-  )
+  assert.equal(await prepared.tool.execute(prepared.args), '完成调查')
 })
 
 test('真实 SDK 请求只发送选定的输出上限字段', async () => {
-  for (
-    const outputTokenParam of
-    ['max_completion_tokens', 'max_tokens'] as const
-  ) {
+  for (const outputTokenParam of ['max_completion_tokens', 'max_tokens'] as const) {
     const createStream = createModelStream(
       { ...testConfig, outputTokenParam },
       async (_input, init) => {
@@ -288,9 +281,7 @@ test('真实 SDK 请求只发送选定的输出上限字段', async () => {
 
         assert.equal(body[outputTokenParam], 77)
 
-        const other = outputTokenParam === 'max_tokens'
-          ? 'max_completion_tokens'
-          : 'max_tokens'
+        const other = outputTokenParam === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens'
 
         assert.equal(body[other], undefined)
 
@@ -318,16 +309,19 @@ test('服务端上下文超限归为预算耗尽，主轮不重试', async () =>
   const createStream = createModelStream(testConfig, async () => {
     requests++
 
-    return new Response(JSON.stringify({
-      error: {
-        message: 'private provider detail',
-        type: 'invalid_request_error',
-        code: 'context_length_exceeded',
-      },
-    }), {
-      status: 400,
-      headers: { 'content-type': 'application/json' },
-    })
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: 'private provider detail',
+          type: 'invalid_request_error',
+          code: 'context_length_exceeded',
+        },
+      }),
+      {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }
+    )
   })
 
   const result = await runTurn(task(), {

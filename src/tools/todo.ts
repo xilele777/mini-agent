@@ -4,9 +4,7 @@ import type { SessionHandle } from '../session.js'
 import { CheckpointError } from '../turn.js'
 
 export function createTodoTools(session: SessionHandle): Tool[] {
-  async function update(
-    change: Parameters<SessionHandle['update']>[0]
-  ) {
+  async function update(change: Parameters<SessionHandle['update']>[0]) {
     try {
       await session.update(change)
     } catch (error) {

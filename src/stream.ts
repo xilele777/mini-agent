@@ -48,10 +48,7 @@ export async function collectResponse(
         throw new Error(`暂不支持 choice index ${choice.index}`)
       }
 
-      if (
-        choice.delta.role !== undefined &&
-        choice.delta.role !== 'assistant'
-      ) {
+      if (choice.delta.role !== undefined && choice.delta.role !== 'assistant') {
         throw new Error(`流中出现了非 assistant 角色: ${choice.delta.role}`)
       }
 
@@ -117,9 +114,7 @@ export async function collectResponse(
     throw new Error('流式响应缺少结束原因')
   }
 
-  const entries = [...callsByIndex.entries()].sort(
-    ([left], [right]) => left - right
-  )
+  const entries = [...callsByIndex.entries()].sort(([left], [right]) => left - right)
 
   const toolCalls: ChatCompletionMessageFunctionToolCall[] = []
   const seenIds = new Set<string>()
@@ -133,15 +128,11 @@ export async function collectResponse(
     const [index, call] = entry
 
     if (index !== position) {
-      throw new Error(
-        `工具调用编号必须从 0 连续递增，收到 ${index}`
-      )
+      throw new Error(`工具调用编号必须从 0 连续递增，收到 ${index}`)
     }
 
     if (!call.id || !call.name || call.type !== 'function') {
-      throw new Error(
-        `工具调用 ${index} 缺少 id、type 或 name`
-      )
+      throw new Error(`工具调用 ${index} 缺少 id、type 或 name`)
     }
 
     if (seenIds.has(call.id)) {

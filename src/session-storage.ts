@@ -10,10 +10,7 @@ function hasCode(error: unknown, code: string): boolean {
 }
 
 /** 只有文件不存在才返回 null；读取错误和损坏不能伪装成空会话。 */
-export async function readSnapshot<T>(
-  file: string,
-  schema: ZodType<T>
-): Promise<T | null> {
+export async function readSnapshot<T>(file: string, schema: ZodType<T>): Promise<T | null> {
   let raw: string
 
   try {
@@ -74,9 +71,7 @@ export async function writeSnapshot<T>(
  * 文件存在即表示占用；必须在读取快照前获取，并持有到会话关闭。
  * 崩溃遗留锁不自动抢占：先确认原进程退出，再人工清理。
  */
-export async function acquireSessionLock(
-  directory: string
-): Promise<() => Promise<void>> {
+export async function acquireSessionLock(directory: string): Promise<() => Promise<void>> {
   await mkdir(directory, { recursive: true })
   const file = join(directory, 'session.lock')
   const handle = await open(file, 'wx', 0o600).catch((error: unknown) => {
@@ -88,10 +83,12 @@ export async function acquireSessionLock(
 
   try {
     try {
-      await handle.writeFile(JSON.stringify({
-        pid: process.pid,
-        createdAt: new Date().toISOString(),
-      }))
+      await handle.writeFile(
+        JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date().toISOString(),
+        })
+      )
     } finally {
       await handle.close()
     }

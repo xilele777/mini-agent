@@ -18,10 +18,7 @@ export const finishTaskTool: Tool<z.infer<typeof finishParams>> = {
 }
 
 const askUserParams = z.object({
-  question: z
-    .string()
-    .min(1, '问题不能为空')
-    .describe('要问用户的问题,用户会原样看到并输入回答'),
+  question: z.string().min(1, '问题不能为空').describe('要问用户的问题,用户会原样看到并输入回答'),
 })
 
 /** 在当前轮内等待输入，回答作为工具结果回填，随后继续请求模型。 */

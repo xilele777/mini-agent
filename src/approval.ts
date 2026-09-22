@@ -19,8 +19,9 @@ function actionKey(tool: Tool, args: unknown): string {
 }
 
 export async function requestApproval(
-  tool: Tool, args: unknown,
-  context: ExecutionContext & { action?: PreparedAction } = {},
+  tool: Tool,
+  args: unknown,
+  context: ExecutionContext & { action?: PreparedAction } = {}
 ): Promise<boolean> {
   context.signal?.throwIfAborted()
   const key = context.action?.approvalKey ?? actionKey(tool, args)
@@ -32,20 +33,29 @@ export async function requestApproval(
   }
 
   // 缺少专用预览时展示完整参数，用户仍能检查具体动作。
-  const detail = context.action?.preview ?? (tool.preview ? tool.preview(args) : JSON.stringify(args, null, 2))
+  const detail =
+    context.action?.preview ?? (tool.preview ? tool.preview(args) : JSON.stringify(args, null, 2))
 
   console.log(`\n${LINE}`)
   console.log(`⚠️  Agent 请求执行:${tool.name}`)
   console.log(LINE)
   // 防止文件或命令中的终端控制码隐藏真正的批准内容。
-  console.log(detail.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`))
+  console.log(
+    detail.replace(
+      /[\x00-\x08\x0b-\x1f\x7f]/g,
+      (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`
+    )
+  )
   console.log(LINE)
 
   for (;;) {
     const answer = (
-      await ask(cacheable
-        ? '批准?  [y] 允许   [n] 拒绝   [a] 相同动作不再询问 > '
-        : '批准本次文件变更?  [y] 允许   [n] 拒绝 > ', context.signal)
+      await ask(
+        cacheable
+          ? '批准?  [y] 允许   [n] 拒绝   [a] 相同动作不再询问 > '
+          : '批准本次文件变更?  [y] 允许   [n] 拒绝 > ',
+        context.signal
+      )
     )
       .trim()
       .toLowerCase()

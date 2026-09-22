@@ -1,25 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {
-  createDelegateTaskTool,
-} from './delegate.js'
+import { createDelegateTaskTool } from './delegate.js'
 import { testRuntime } from '../test-runtime.js'
 
-const { getToolSchemas, prepareCall } =
-  testRuntime.turnOptions.registry
+const { getToolSchemas, prepareCall } = testRuntime.turnOptions.registry
 
 test('主注册表暴露 delegate_task', () => {
-  const names = getToolSchemas()
-    .map((tool) => tool.function.name)
+  const names = getToolSchemas().map((tool) => tool.function.name)
 
   assert.ok(names.includes('delegate_task'))
 })
 
 test('delegate_task 的参数由主注册表校验', () => {
-  const prepared = prepareCall(
-    'delegate_task',
-    '{"task":"  检查入口文件  "}'
-  )
+  const prepared = prepareCall('delegate_task', '{"task":"  检查入口文件  "}')
 
   if (!prepared.ok) {
     assert.fail(prepared.error)
@@ -48,9 +41,7 @@ test('delegate_task 将子任务交给注入的 runner', async () => {
 })
 
 test('delegate_task 不需要人工批准或结束主轮', () => {
-  const tool = createDelegateTaskTool(
-    async () => 'result'
-  )
+  const tool = createDelegateTaskTool(async () => 'result')
 
   assert.equal(tool.needsApproval, undefined)
   assert.equal(tool.endsTurn, undefined)

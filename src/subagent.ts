@@ -8,23 +8,10 @@ import { collectResponse } from './stream.js'
 import { randomUUID } from 'node:crypto'
 import { RunBudgetError, type RunControl } from './run-control.js'
 import { safeToolName } from './telemetry.js'
-import {
-  detectRepeatedCall,
-  truncateToolResult,
-} from './context.js'
-import type {
-  HistoryMessage,
-  ToolCallLog,
-} from './context.js'
-import {
-  buildContext,
-  ContextBudgetError,
-  type ContextBudget,
-} from './context-budget.js'
-import {
-  executeCall,
-  type ToolRegistry,
-} from './tools/registry.js'
+import { detectRepeatedCall, truncateToolResult } from './context.js'
+import type { HistoryMessage, ToolCallLog } from './context.js'
+import { buildContext, ContextBudgetError, type ContextBudget } from './context-budget.js'
+import { executeCall, type ToolRegistry } from './tools/registry.js'
 
 // Note: 同步只读子 Agent 的上下文与能力边界 — 见 .agents/notes/implemented/feature/2026-09-19-isolated-readonly-subagent.md
 
@@ -45,7 +32,6 @@ const FINAL_NUDGE = [
   '如果证据不足，明确说明已经确认的内容和仍缺少的信息。',
   '不要再请求任何工具。',
 ].join('\n')
-
 
 export interface SubAgentRequest {
   signal?: AbortSignal
@@ -68,9 +54,7 @@ export interface RunSubAgentOptions {
   contextBudget: ContextBudget
 }
 
-function getFinalText(
-  message: ChatCompletionMessage
-): string | null {
+function getFinalText(message: ChatCompletionMessage): string | null {
   const content = message.content?.trim() ?? ''
   const refusal = message.refusal?.trim() ?? ''
 
@@ -84,35 +68,31 @@ function getFinalText(
   return null
 }
 
-export async function runSubAgent(
-  task: string,
-  options: RunSubAgentOptions
-): Promise<string> {
+export async function runSubAgent(task: string, options: RunSubAgentOptions): Promise<string> {
   const normalizedTask = task.trim()
 
   if (!normalizedTask) {
     throw new Error('子 Agent 任务不能为空')
   }
 
-  const maxIterations =
-    options.maxIterations
+  const maxIterations = options.maxIterations
 
-  if (
-    !Number.isInteger(maxIterations) ||
-    maxIterations <= 0
-  ) {
+  if (!Number.isInteger(maxIterations) || maxIterations <= 0) {
     throw new Error('子 Agent 请求上限必须是正整数')
   }
 
   const taskId = randomUUID()
-  const createStream: CreateSubAgentStream = request => {
+  const createStream: CreateSubAgentStream = (request) => {
     options.signal?.throwIfAborted()
-    if (options.control) return options.control.stream(options.createStream, { ...request, scope: 'subagent', taskId })
-    return options.createStream({ ...request, ...(options.signal ? { signal: options.signal } : {}) })
+    if (options.control)
+      return options.control.stream(options.createStream, { ...request, scope: 'subagent', taskId })
+    return options.createStream({
+      ...request,
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
   }
 
-  const report =
-    options.onProgress ?? (() => undefined)
+  const report = options.onProgress ?? (() => undefined)
 
   const messages: HistoryMessage[] = [
     {
@@ -128,14 +108,9 @@ export async function runSubAgent(
 
   const recentCalls: ToolCallLog[] = []
 
-  for (
-    let iteration = 0;
-    iteration < maxIterations;
-    iteration++
-  ) {
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
     const requestNumber = iteration + 1
-    const isFinalRequest =
-      requestNumber === maxIterations
+    const isFinalRequest = requestNumber === maxIterations
 
     /*
      * 最后一次请求不再开放工具。
@@ -148,24 +123,13 @@ export async function runSubAgent(
       })
     }
 
-    report(
-      `请求 ${requestNumber}/${maxIterations}` +
-      (isFinalRequest ? '（最终总结）' : '')
-    )
+    report(`请求 ${requestNumber}/${maxIterations}` + (isFinalRequest ? '（最终总结）' : ''))
 
-    const tools = isFinalRequest
-      ? []
-      : options.registry.getToolSchemas()
+    const tools = isFinalRequest ? [] : options.registry.getToolSchemas()
 
-    const plan = buildContext(
-      messages,
-      tools,
-      options.contextBudget
-    )
+    const plan = buildContext(messages, tools, options.contextBudget)
 
-    report(
-      `ctx estimated=${plan.estimatedInputTokens}/${plan.inputLimit}`
-    )
+    report(`ctx estimated=${plan.estimatedInputTokens}/${plan.inputLimit}`)
 
     if (!plan.ok) {
       return `[子 Agent 上下文预算耗尽] ${plan.reason}`
@@ -180,10 +144,7 @@ export async function runSubAgent(
         maxOutputTokens: options.contextBudget.outputReserve,
       })
 
-      response = await collectResponse(
-        stream,
-        () => undefined
-      )
+      response = await collectResponse(stream, () => undefined)
     } catch (error) {
       if (error instanceof RunBudgetError) throw error
       if (error instanceof ContextBudgetError) {
@@ -197,8 +158,8 @@ export async function runSubAgent(
     if (usage) {
       report(
         `ctx prompt=${usage.prompt_tokens}` +
-        ` completion=${usage.completion_tokens}` +
-        ` total=${usage.total_tokens}`
+          ` completion=${usage.completion_tokens}` +
+          ` total=${usage.total_tokens}`
       )
     }
 
@@ -221,9 +182,7 @@ export async function runSubAgent(
      * 如果兼容服务仍返回工具调用，视为协议异常，不执行。
      */
     if (isFinalRequest) {
-      throw new Error(
-        '子 Agent 在最终总结请求中仍返回了工具调用'
-      )
+      throw new Error('子 Agent 在最终总结请求中仍返回了工具调用')
     }
 
     for (const call of toolCalls) {
@@ -233,8 +192,7 @@ export async function runSubAgent(
 
       if (call.type !== 'function') {
         toolName = call.type
-        observation =
-          `错误:子 Agent 不支持工具调用类型 "${call.type}"。`
+        observation = `错误:子 Agent 不支持工具调用类型 "${call.type}"。`
       } else {
         toolName = call.function.name
 
@@ -243,32 +201,29 @@ export async function runSubAgent(
           argsKey: call.function.arguments,
         })
 
-        const guard = detectRepeatedCall(
-          recentCalls,
-          REPEAT_THRESHOLD
-        )
+        const guard = detectRepeatedCall(recentCalls, REPEAT_THRESHOLD)
 
         if (guard) {
-          observation =
-            `${guard}\n` +
-            '你是子 Agent，请把当前进展和缺口返回主 Agent。'
+          observation = `${guard}\n` + '你是子 Agent，请把当前进展和缺口返回主 Agent。'
         } else {
-          const prepared =
-            options.registry.prepareCall(
-              call.function.name,
-              call.function.arguments
-            )
+          const prepared = options.registry.prepareCall(call.function.name, call.function.arguments)
 
           if (!prepared.ok) {
             observation = prepared.error
           } else if (prepared.tool.needsApproval) {
-            observation =
-              `错误:子 Agent 不能执行需要人工批准的工具 ` +
-              `"${prepared.tool.name}"。`
+            observation = `错误:子 Agent 不能执行需要人工批准的工具 ` + `"${prepared.tool.name}"。`
           } else {
             const action = options.control?.nextAction()
             const emit = (state: 'started' | 'returned' | 'uncertain') => {
-              if (action !== undefined) options.control?.emit({ type: 'tool', scope: 'subagent', taskId, action, tool: safeToolName(prepared.tool.name), state })
+              if (action !== undefined)
+                options.control?.emit({
+                  type: 'tool',
+                  scope: 'subagent',
+                  taskId,
+                  action,
+                  tool: safeToolName(prepared.tool.name),
+                  state,
+                })
             }
             emit('started')
             try {
@@ -277,19 +232,18 @@ export async function runSubAgent(
                 ...(options.control ? { control: options.control } : {}),
               })
               emit('returned')
-            } catch (error) { emit('uncertain'); throw error }
+            } catch (error) {
+              emit('uncertain')
+              throw error
+            }
           }
         }
       }
 
-      const firstLine =
-        truncateToolResult(observation).split('\n')[0] ?? ''
-      const more =
-        observation.includes('\n') ? ' …' : ''
+      const firstLine = truncateToolResult(observation).split('\n')[0] ?? ''
+      const more = observation.includes('\n') ? ' …' : ''
 
-      report(
-        `→ ${toolName} ⇒ ${firstLine}${more}`
-      )
+      report(`→ ${toolName} ⇒ ${firstLine}${more}`)
 
       messages.push({
         role: 'tool',
@@ -300,7 +254,5 @@ export async function runSubAgent(
   }
 
   // 最后一次请求正常情况下必定返回文本或提前抛出协议错误。
-  throw new Error(
-    `子 Agent 连续 ${maxIterations} 次请求仍未返回最终文本`
-  )
+  throw new Error(`子 Agent 连续 ${maxIterations} 次请求仍未返回最终文本`)
 }

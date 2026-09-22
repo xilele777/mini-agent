@@ -16,48 +16,50 @@ const callSchema = z.strictObject({
 })
 
 // 只接受当前 CLI 实际支持的文本与 function calling。
-export const messageSchema = z.discriminatedUnion('role', [
-  z.strictObject({
-    role: z.literal('system'),
-    content: z.string(),
-  }),
-  z.strictObject({
-    role: z.literal('user'),
-    content: z.string(),
-    startsTurn: z.literal(true).optional(),
-  }),
-  z.strictObject({
-    role: z.literal('assistant'),
-    content: z.string().nullable(),
-    refusal: z.string().nullable().optional(),
-    tool_calls: z.array(callSchema).min(1).optional(),
-  }),
-  z.strictObject({
-    role: z.literal('tool'),
-    tool_call_id: text,
-    content: z.string(),
-  }),
-]).transform((message) => {
-  // exactOptionalPropertyTypes：可选字段不存在时，实际省略这个键。
-  if (message.role === 'user') {
-    const { startsTurn, ...rest } = message
-    return {
-      ...rest,
-      ...(startsTurn === true ? { startsTurn } : {}),
+export const messageSchema = z
+  .discriminatedUnion('role', [
+    z.strictObject({
+      role: z.literal('system'),
+      content: z.string(),
+    }),
+    z.strictObject({
+      role: z.literal('user'),
+      content: z.string(),
+      startsTurn: z.literal(true).optional(),
+    }),
+    z.strictObject({
+      role: z.literal('assistant'),
+      content: z.string().nullable(),
+      refusal: z.string().nullable().optional(),
+      tool_calls: z.array(callSchema).min(1).optional(),
+    }),
+    z.strictObject({
+      role: z.literal('tool'),
+      tool_call_id: text,
+      content: z.string(),
+    }),
+  ])
+  .transform((message) => {
+    // exactOptionalPropertyTypes：可选字段不存在时，实际省略这个键。
+    if (message.role === 'user') {
+      const { startsTurn, ...rest } = message
+      return {
+        ...rest,
+        ...(startsTurn === true ? { startsTurn } : {}),
+      }
     }
-  }
 
-  if (message.role === 'assistant') {
-    const { refusal, tool_calls, ...rest } = message
-    return {
-      ...rest,
-      ...(refusal !== undefined ? { refusal } : {}),
-      ...(tool_calls !== undefined ? { tool_calls } : {}),
+    if (message.role === 'assistant') {
+      const { refusal, tool_calls, ...rest } = message
+      return {
+        ...rest,
+        ...(refusal !== undefined ? { refusal } : {}),
+        ...(tool_calls !== undefined ? { tool_calls } : {}),
+      }
     }
-  }
 
-  return message
-})
+    return message
+  })
 
 const actionSchema = z.strictObject({
   messageIndex: z.number().int().nonnegative(),
@@ -74,25 +76,22 @@ const dataSchema = z.strictObject({
   updatedAt: z.iso.datetime(),
   messages: z.array(messageSchema),
   summary: summarySchema.nullable(),
-  turns: z.array(z.strictObject({
-    id,
-    start: z.number().int().nonnegative(),
-    status: z.enum([
-      'running',
-      'completed',
-      'paused',
-      'cancelled',
-      'failed',
-      'budget_exhausted',
-    ]),
-    reason: z.string(),
-    actions: z.array(actionSchema),
-  })),
+  turns: z.array(
+    z.strictObject({
+      id,
+      start: z.number().int().nonnegative(),
+      status: z.enum(['running', 'completed', 'paused', 'cancelled', 'failed', 'budget_exhausted']),
+      reason: z.string(),
+      actions: z.array(actionSchema),
+    })
+  ),
   todo: z.strictObject({
-    tasks: z.array(z.strictObject({
-      id: z.number().int().positive(),
-      title: text,
-    })),
+    tasks: z.array(
+      z.strictObject({
+        id: z.number().int().positive(),
+        title: text,
+      })
+    ),
     nextId: z.number().int().positive(),
   }),
 })
@@ -100,14 +99,15 @@ const dataSchema = z.strictObject({
 export type Session = z.infer<typeof dataSchema>
 
 const validatedSessionSchema = dataSchema.superRefine((s, ctx) => {
-  const bad = (message: string) =>
-    ctx.addIssue({ code: 'custom', message })
+  const bad = (message: string) => ctx.addIssue({ code: 'custom', message })
 
   if (s.summary) {
     const first = s.messages.findIndex((m) => m.role === 'user' && m.startsTurn)
     const boundary = s.turns.findIndex((t) => t.start === s.summary!.through)
     if (
-      first < 0 || s.summary.through <= first || boundary <= 0 ||
+      first < 0 ||
+      s.summary.through <= first ||
+      boundary <= 0 ||
       s.turns.slice(0, boundary).some((t) => t.status === 'running') ||
       historyFingerprint(s.messages, s.summary.through) !== s.summary.sourceHash
     ) {
@@ -125,10 +125,7 @@ const validatedSessionSchema = dataSchema.superRefine((s, ctx) => {
   }
 
   // 普通文本历史可以独立保存；工具调用必须有所属用户轮与动作记录。
-  const allActions = new Map<
-    string,
-    Session['turns'][number]['actions'][number]
-  >()
+  const allActions = new Map<string, Session['turns'][number]['actions'][number]>()
 
   s.turns.forEach((turn, index) => {
     const next = s.turns[index + 1]?.start ?? s.messages.length
@@ -150,11 +147,7 @@ const validatedSessionSchema = dataSchema.superRefine((s, ctx) => {
     for (const action of turn.actions) {
       const key = `${action.messageIndex}:${action.callId}`
 
-      if (
-        allActions.has(key) ||
-        action.messageIndex <= turn.start ||
-        action.messageIndex >= next
-      ) {
+      if (allActions.has(key) || action.messageIndex <= turn.start || action.messageIndex >= next) {
         bad('动作归属或标识无效')
       }
 
@@ -165,11 +158,7 @@ const validatedSessionSchema = dataSchema.superRefine((s, ctx) => {
         bad('未结束动作状态无效')
       }
 
-      if (
-        action.state !== 'pending' &&
-        action.state !== 'started' &&
-        action.observation === null
-      ) {
+      if (action.state !== 'pending' && action.state !== 'started' && action.observation === null) {
         bad('已结束动作缺少结果')
       }
 
@@ -178,10 +167,13 @@ const validatedSessionSchema = dataSchema.superRefine((s, ctx) => {
   })
 
   const seen = new Set<string>()
-  const pending = new Map<string, {
-    key: string
-    action: Session['turns'][number]['actions'][number]
-  }>()
+  const pending = new Map<
+    string,
+    {
+      key: string
+      action: Session['turns'][number]['actions'][number]
+    }
+  >()
 
   s.messages.forEach((message, index) => {
     if (message.role === 'tool') {
@@ -235,8 +227,11 @@ const validatedSessionSchema = dataSchema.superRefine((s, ctx) => {
 // v1 与未知版本继续拒绝，不能把缺失的动作记录猜成已完成。
 export const sessionSchema = z.preprocess((value) => {
   if (
-    typeof value === 'object' && value !== null &&
-    'version' in value && value.version === 2 && !('summary' in value)
+    typeof value === 'object' &&
+    value !== null &&
+    'version' in value &&
+    value.version === 2 &&
+    !('summary' in value)
   ) {
     return { ...value, version: 3, summary: null }
   }

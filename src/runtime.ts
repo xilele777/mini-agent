@@ -1,13 +1,7 @@
 import type { AppConfig } from './config.js'
 import { createModelStream } from './llm.js'
-import {
-  runSubAgent,
-  type RunSubAgentOptions,
-} from './subagent.js'
-import type {
-  CreateTurnStream,
-  RunTurnOptions,
-} from './turn.js'
+import { runSubAgent, type RunSubAgentOptions } from './subagent.js'
+import type { CreateTurnStream, RunTurnOptions } from './turn.js'
 import { createMainRegistry } from './tools/index.js'
 import { createToolRegistry } from './tools/registry.js'
 import { createReadFileTool } from './tools/fs.js'
@@ -29,12 +23,7 @@ export function createRuntime(
     createStream,
     contextBudget: config.contextBudget,
     maxIterations: config.subagentMaxIterations,
-    registry: createToolRegistry([
-      readFile,
-      grepTool,
-      calcTool,
-      timeTool,
-    ]),
+    registry: createToolRegistry([readFile, grepTool, calcTool, timeTool]),
   }
 
   const registry = createMainRegistry({

@@ -1,29 +1,13 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import {
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import {
-  createSession,
-  listSessions,
-  openSession,
-} from './session.js'
+import { createSession, listSessions, openSession } from './session.js'
 
-async function fixture(
-  run: (root: string) => Promise<void>
-) {
-  const root = await mkdtemp(
-    join(tmpdir(), 'mini-agent-session-model-')
-  )
+async function fixture(run: (root: string) => Promise<void>) {
+  const root = await mkdtemp(join(tmpdir(), 'mini-agent-session-model-'))
   try {
     await run(root)
   } finally {
@@ -54,10 +38,7 @@ test('项目路径规范化，新会话不继承其他会话或旧 todo', async 
       assert.notEqual(a.snapshot.id, b.snapshot.id)
       assert.deepEqual(b.snapshot.todo, { tasks: [], nextId: 1 })
       assert.equal((await listSessions(root)).length, 2)
-      assert.match(
-        await readFile(join(root, '.mini-agent-todo.json'), 'utf8'),
-        /旧任务/
-      )
+      assert.match(await readFile(join(root, '.mini-agent-todo.json'), 'utf8'), /旧任务/)
     } finally {
       await a.close()
       await b.close()
@@ -86,11 +67,13 @@ test('关闭并重开后恢复消息、轮边界与 todo', async () => {
 
     const b = await openSession(root, id)
     try {
-      assert.deepEqual(b.snapshot.messages, [{
-        role: 'user',
-        content: '读 README',
-        startsTurn: true,
-      }])
+      assert.deepEqual(b.snapshot.messages, [
+        {
+          role: 'user',
+          content: '读 README',
+          startsTurn: true,
+        },
+      ])
       assert.deepEqual(b.snapshot.todo, {
         tasks: [{ id: 1, title: '读 README' }],
         nextId: 2,
@@ -129,23 +112,29 @@ test('无效 todo 和身份修改不改变内存或磁盘', async () => {
       const before = session.snapshot
       const raw = await readFile(fileOf(root, before.id), 'utf8')
 
-      await assert.rejects(session.update((draft) => {
-        draft.todo.tasks.push({ id: 1, title: '编号冲突' })
-      }), /nextId/)
+      await assert.rejects(
+        session.update((draft) => {
+          draft.todo.tasks.push({ id: 1, title: '编号冲突' })
+        }),
+        /nextId/
+      )
 
-      await assert.rejects(session.update((draft) => {
-        draft.id = randomUUID()
-      }), /ID/)
+      await assert.rejects(
+        session.update((draft) => {
+          draft.id = randomUUID()
+        }),
+        /ID/
+      )
 
-      await assert.rejects(session.update((draft) => {
-        draft.projectRoot = '其他项目'
-      }), /项目/)
+      await assert.rejects(
+        session.update((draft) => {
+          draft.projectRoot = '其他项目'
+        }),
+        /项目/
+      )
 
       assert.deepEqual(session.snapshot, before)
-      assert.equal(
-        await readFile(fileOf(root, before.id), 'utf8'),
-        raw
-      )
+      assert.equal(await readFile(fileOf(root, before.id), 'utf8'), raw)
     } finally {
       await session.close()
     }
@@ -160,10 +149,7 @@ test('复制到其他项目的会话拒绝打开且释放锁', async () => {
 
     const other = join(root, 'other')
     const target = fileOf(other, id)
-    await mkdir(
-      join(other, '.mini-agent', 'sessions', id),
-      { recursive: true }
-    )
+    await mkdir(join(other, '.mini-agent', 'sessions', id), { recursive: true })
     await copyFile(fileOf(root, id), target)
     const raw = await readFile(target, 'utf8')
 
@@ -182,21 +168,12 @@ test('损坏或未知版本单独列为错误，不拖垮列表、不覆盖文�
     await bad.close()
 
     try {
-      for (const raw of [
-        '{broken',
-        JSON.stringify({ ...original, version: 99 }),
-      ]) {
+      for (const raw of ['{broken', JSON.stringify({ ...original, version: 99 })]) {
         await writeFile(fileOf(root, id), raw)
         const rows = await listSessions(root)
 
-        assert.equal(
-          rows.find((row) => row.id === good.snapshot.id)?.ok,
-          true
-        )
-        assert.equal(
-          rows.find((row) => row.id === id)?.ok,
-          false
-        )
+        assert.equal(rows.find((row) => row.id === good.snapshot.id)?.ok, true)
+        assert.equal(rows.find((row) => row.id === id)?.ok, false)
 
         await assert.rejects(openSession(root, id), /JSON|不兼容/)
         await assert.rejects(openSession(root, id), /JSON|不兼容/)
@@ -258,10 +235,7 @@ test('已打开会话拒绝再次打开，关闭后不能更新', async () => {
     const session = await createSession(root)
 
     try {
-      await assert.rejects(
-        openSession(root, session.snapshot.id),
-        /占用/
-      )
+      await assert.rejects(openSession(root, session.snapshot.id), /占用/)
     } finally {
       await session.close()
     }

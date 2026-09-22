@@ -29,7 +29,11 @@ function globToRegex(glob: string): RegExp {
  * 递归遍历普通目录与文件，读取目录失败时跳过该目录。
  * Dirent 的链接条目不会进入 isDirectory / isFile 分支，因此不会主动跟随链接。
  */
-async function walk(dir: string, onFile: (file: string) => Promise<void>, signal?: AbortSignal): Promise<void> {
+async function walk(
+  dir: string,
+  onFile: (file: string) => Promise<void>,
+  signal?: AbortSignal
+): Promise<void> {
   signal?.throwIfAborted()
   let entries
   try {
@@ -41,7 +45,8 @@ async function walk(dir: string, onFile: (file: string) => Promise<void>, signal
     signal?.throwIfAborted()
     const full = join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name) && !isBlocked(full) && (await guardDirRead(full)).ok) await walk(full, onFile, signal)
+      if (!SKIP_DIRS.has(entry.name) && !isBlocked(full) && (await guardDirRead(full)).ok)
+        await walk(full, onFile, signal)
     } else if (entry.isFile()) {
       await onFile(full)
     }
@@ -49,11 +54,21 @@ async function walk(dir: string, onFile: (file: string) => Promise<void>, signal
 }
 
 const grepParams = z.object({
-  pattern: z.string().min(1, '要搜的内容不能为空')
+  pattern: z
+    .string()
+    .min(1, '要搜的内容不能为空')
     .describe('正则表达式，例如 "esbuild"，或想搜魔法数字就写 "^0.28"'),
-  path: z.string().default('.').describe('从哪个目录开始递归搜索，默认项目根目录 "."。注意这里是文件夹不是文件。'),
+  path: z
+    .string()
+    .default('.')
+    .describe('从哪个目录开始递归搜索，默认项目根目录 "."。注意这里是文件夹不是文件。'),
   glob: z.string().min(1).optional().describe('只搜文件名匹配这个 glob 的文件，例如 "*.ts"。'),
-  maxResults: z.number().int().min(1).max(200).default(50)
+  maxResults: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .default(50)
     .describe('最多返回多少条匹配，默认 50。命中很多时把它调小，或把 pattern 收窄。'),
 })
 
@@ -86,40 +101,44 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
     // 达到上限后停止读取文件及匹配行；walk 仍会遍历剩余目录项。
     const done = () => hits.length >= maxResults
 
-    await walk(root, async (file) => {
-      if (done()) return
+    await walk(
+      root,
+      async (file) => {
+        if (done()) return
 
-      // 与单文件读取共用敏感路径规则，避免通过搜索返回被拦截文件的内容。
-      if (isBlocked(file) || !(await guardPathRead(file)).ok) return
+        // 与单文件读取共用敏感路径规则，避免通过搜索返回被拦截文件的内容。
+        if (isBlocked(file) || !(await guardPathRead(file)).ok) return
 
-      const relPath = relative(ROOT, file) // 返回相对路径，便于后续定位与分段读取。
-      if (fileFilter && !fileFilter.test(basename(file))) return
+        const relPath = relative(ROOT, file) // 返回相对路径，便于后续定位与分段读取。
+        if (fileFilter && !fileFilter.test(basename(file))) return
 
-      let st
-      try {
-        st = await stat(file)
-      } catch {
-        return
-      }
-      if (st.size > MAX_FILE_BYTES) return
-
-      let text: string
-      try {
-        text = await readFile(file, { encoding: 'utf8', signal })
-      } catch {
-        signal?.throwIfAborted()
-        return // 读取失败时跳过该文件；此处没有额外的二进制格式检测。
-      }
-
-      const lines = text.split('\n')
-      for (let i = 0; i < lines.length && !done(); i++) {
-        const line = lines[i]
-        if (line !== undefined && re.test(line)) {
-          const show = line.length > MAX_LINE ? `${line.slice(0, MAX_LINE)}…` : line
-          hits.push({ file: relPath, line: i + 1, text: show })
+        let st
+        try {
+          st = await stat(file)
+        } catch {
+          return
         }
-      }
-    }, signal)
+        if (st.size > MAX_FILE_BYTES) return
+
+        let text: string
+        try {
+          text = await readFile(file, { encoding: 'utf8', signal })
+        } catch {
+          signal?.throwIfAborted()
+          return // 读取失败时跳过该文件；此处没有额外的二进制格式检测。
+        }
+
+        const lines = text.split('\n')
+        for (let i = 0; i < lines.length && !done(); i++) {
+          const line = lines[i]
+          if (line !== undefined && re.test(line)) {
+            const show = line.length > MAX_LINE ? `${line.slice(0, MAX_LINE)}…` : line
+            hits.push({ file: relPath, line: i + 1, text: show })
+          }
+        }
+      },
+      signal
+    )
     signal?.throwIfAborted()
 
     if (hits.length === 0) {
@@ -130,7 +149,9 @@ export const grepTool: Tool<z.infer<typeof grepParams>> = {
     const out = hits.map((h) => `${h.file}:${h.line}:${h.text}`)
     out.push('', '格式为 "相对路径:行号:该行内容"。')
     if (done()) {
-      out.push(`[已达上限 ${maxResults} 条，结果更多。把 pattern 收窄，或把 maxResults 调小，再搜一次]`)
+      out.push(
+        `[已达上限 ${maxResults} 条，结果更多。把 pattern 收窄，或把 maxResults 调小，再搜一次]`
+      )
     } else {
       out.push(`共 ${hits.length} 条匹配。拿到目标行号后，用 read_file 带 offset 精准读那几行。`)
     }

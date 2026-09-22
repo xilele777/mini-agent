@@ -2,11 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import {
-  acquireSessionLock,
-  readSnapshot,
-  writeSnapshot,
-} from './session-storage.js'
+import { acquireSessionLock, readSnapshot, writeSnapshot } from './session-storage.js'
 import { sessionSchema, type Session } from './session-schema.js'
 
 // Note: 会话存储与项目绑定 — 见 .agents/notes/proposed/architecture/2026-09-20-practical-mini-agent-v1.md
@@ -17,11 +13,7 @@ function sessionsDirectory(projectRoot: string): string {
   return join(projectRoot, '.mini-agent', 'sessions')
 }
 
-function checkIdentity(
-  session: Session,
-  id: string,
-  projectRoot: string
-): void {
+function checkIdentity(session: Session, id: string, projectRoot: string): void {
   if (session.id !== id) {
     throw new Error('会话 ID 与目录不一致')
   }
@@ -32,17 +24,11 @@ function checkIdentity(
 
 export interface SessionHandle {
   readonly snapshot: Session
-  update(
-    change: (draft: Session) => void | Promise<void>
-  ): Promise<void>
+  update(change: (draft: Session) => void | Promise<void>): Promise<void>
   close(): Promise<void>
 }
 
-function createHandle(
-  initial: Session,
-  file: string,
-  release: () => Promise<void>
-): SessionHandle {
+function createHandle(initial: Session, file: string, release: () => Promise<void>): SessionHandle {
   let state = initial
   let busy = false
   let closed = false
@@ -86,9 +72,7 @@ function createHandle(
   }
 }
 
-export async function createSession(
-  project: string
-): Promise<SessionHandle> {
+export async function createSession(project: string): Promise<SessionHandle> {
   const projectRoot = await realpath(project)
   const id = randomUUID()
   const parent = sessionsDirectory(projectRoot)
@@ -124,10 +108,7 @@ export async function createSession(
   }
 }
 
-export async function openSession(
-  project: string,
-  inputId: string
-): Promise<SessionHandle> {
+export async function openSession(project: string, inputId: string): Promise<SessionHandle> {
   const id = idSchema.parse(inputId)
   const projectRoot = await realpath(project)
   const directory = join(sessionsDirectory(projectRoot), id)
@@ -165,20 +146,14 @@ export type SessionEntry =
       error: string
     }
 
-export async function listSessions(
-  project: string
-): Promise<SessionEntry[]> {
+export async function listSessions(project: string): Promise<SessionEntry[]> {
   const projectRoot = await realpath(project)
   const parent = sessionsDirectory(projectRoot)
 
   const entries = await readdir(parent, {
     withFileTypes: true,
   }).catch((error: unknown) => {
-    if (
-      error instanceof Error &&
-      'code' in error &&
-      error.code === 'ENOENT'
-    ) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       return []
     }
     throw error
@@ -187,18 +162,12 @@ export async function listSessions(
   const rows: SessionEntry[] = []
 
   for (const entry of entries) {
-    if (
-      !entry.isDirectory() ||
-      !idSchema.safeParse(entry.name).success
-    ) {
+    if (!entry.isDirectory() || !idSchema.safeParse(entry.name).success) {
       continue
     }
 
     try {
-      const state = await readSnapshot(
-        join(parent, entry.name, 'snapshot.json'),
-        sessionSchema
-      )
+      const state = await readSnapshot(join(parent, entry.name, 'snapshot.json'), sessionSchema)
 
       if (!state) throw new Error('会话快照不存在')
       checkIdentity(state, entry.name, projectRoot)
@@ -214,9 +183,7 @@ export async function listSessions(
       rows.push({
         id: entry.name,
         ok: false,
-        error: error instanceof Error
-          ? error.message
-          : '读取失败',
+        error: error instanceof Error ? error.message : '读取失败',
       })
     }
   }

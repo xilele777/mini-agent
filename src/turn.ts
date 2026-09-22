@@ -4,14 +4,8 @@ import type {
   ChatCompletionMessageParam,
 } from 'openai/resources/chat/completions'
 import { requestApproval } from './approval.js'
-import {
-  detectRepeatedCall,
-  truncateToolResult,
-} from './context.js'
-import type {
-  HistoryMessage,
-  ToolCallLog,
-} from './context.js'
+import { detectRepeatedCall, truncateToolResult } from './context.js'
+import type { HistoryMessage, ToolCallLog } from './context.js'
 import { collectResponse } from './stream.js'
 import { RunControl, type RunLimits } from './run-control.js'
 import { renderEvent, safeToolName, type EventSink } from './telemetry.js'
@@ -25,7 +19,6 @@ import {
 } from './context-budget.js'
 
 // Note: 主轮与 REPL 分离，以模拟流测试生命周期控制 — 见 .agents/notes/implemented/architecture/2026-09-20-testable-turn-runner.md
-
 
 /** 连续相同调用达到此次数时触发循环守卫。 */
 const REPEAT_THRESHOLD = 3
@@ -69,9 +62,7 @@ export interface TurnRequest {
  *
  * 生产环境使用真实 API，测试环境注入模拟流。
  */
-export type CreateTurnStream = (
-  request: TurnRequest
-) => Promise<AsyncIterable<ChatCompletionChunk>>
+export type CreateTurnStream = (request: TurnRequest) => Promise<AsyncIterable<ChatCompletionChunk>>
 
 export type PrepareContext = (
   history: HistoryMessage[],
@@ -79,12 +70,7 @@ export type PrepareContext = (
   requests: { createStream: CreateTurnStream; remaining: number }
 ) => Promise<ContextPlan>
 
-export type TurnStatus =
-  | 'completed'
-  | 'paused'
-  | 'cancelled'
-  | 'failed'
-  | 'budget_exhausted'
+export type TurnStatus = 'completed' | 'paused' | 'cancelled' | 'failed' | 'budget_exhausted'
 
 export interface TurnResult {
   status: TurnStatus
@@ -116,10 +102,7 @@ export interface RunTurnOptions {
   write?: (text: string) => void
   log?: (message: string) => void
   approve?: typeof requestApproval
-  checkpoint?: (
-    event: TurnEvent,
-    messages: HistoryMessage[]
-  ) => Promise<void>
+  checkpoint?: (event: TurnEvent, messages: HistoryMessage[]) => Promise<void>
   contextBudget: ContextBudget
   prepareContext?: PrepareContext
 }
@@ -135,9 +118,9 @@ export class CheckpointError extends Error {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof Error && (
-    error.name === 'AbortError' ||
-    ('code' in error && error.code === 'ABORT_ERR')
+  return (
+    error instanceof Error &&
+    (error.name === 'AbortError' || ('code' in error && error.code === 'ABORT_ERR'))
   )
 }
 
@@ -151,25 +134,28 @@ export async function runTurn(
   messages: HistoryMessage[],
   options: RunTurnOptions
 ): Promise<TurnResult> {
-  if (
-    !Number.isInteger(options.maxIterations) ||
-    options.maxIterations <= 0
-  ) {
+  if (!Number.isInteger(options.maxIterations) || options.maxIterations <= 0) {
     throw new Error('主 Agent 请求上限必须是正整数')
   }
 
-  const write = options.write ?? ((text: string) => {
-    process.stdout.write(text)
-  })
-  const log = options.log ?? ((text: string) => {
-    console.log(text)
-  })
+  const write =
+    options.write ??
+    ((text: string) => {
+      process.stdout.write(text)
+    })
+  const log =
+    options.log ??
+    ((text: string) => {
+      console.log(text)
+    })
   const approve = options.approve ?? requestApproval
-  const control = options.control ?? new RunControl(options.runLimits, options.signal, event => {
-    const rendered = renderEvent(event)
-    if (rendered) log(rendered)
-    options.onEvent?.(event)
-  })
+  const control =
+    options.control ??
+    new RunControl(options.runLimits, options.signal, (event) => {
+      const rendered = renderEvent(event)
+      if (rendered) log(rendered)
+      options.onEvent?.(event)
+    })
   const signal = control.signal
 
   const recentCalls: ToolCallLog[] = []
@@ -192,19 +178,13 @@ export async function runTurn(
     if (!options.checkpoint) return
 
     try {
-      await options.checkpoint(
-        structuredClone(event),
-        structuredClone(messages)
-      )
+      await options.checkpoint(structuredClone(event), structuredClone(messages))
     } catch (error) {
       throw new CheckpointError(error)
     }
   }
 
-  async function finish(
-    status: TurnStatus,
-    reason: string
-  ): Promise<TurnResult> {
+  async function finish(status: TurnStatus, reason: string): Promise<TurnResult> {
     const result = { status, reason }
     await emit({ type: 'turn_end', result })
     control.end(status)
@@ -228,7 +208,14 @@ export async function runTurn(
       state,
       observation,
     })
-    control.emit({ type: 'tool', scope: 'main', taskId: null, action: item.action, tool: safeToolName(item.call.function.name), state })
+    control.emit({
+      type: 'tool',
+      scope: 'main',
+      taskId: null,
+      action: item.action,
+      tool: safeToolName(item.call.function.name),
+      state,
+    })
 
     pending.shift()
     active = undefined
@@ -256,7 +243,7 @@ export async function runTurn(
 
       log(
         `  [ctx] estimated=${plan.estimatedInputTokens}/${plan.inputLimit}` +
-        ` droppedTurns=${plan.droppedTurns}`
+          ` droppedTurns=${plan.droppedTurns}`
       )
 
       if (!plan.ok) {
@@ -290,8 +277,8 @@ export async function runTurn(
       if (usage) {
         log(
           `  [ctx] 本轮 prompt=${usage.prompt_tokens}` +
-          ` completion=${usage.completion_tokens}` +
-          ` total=${usage.total_tokens}`
+            ` completion=${usage.completion_tokens}` +
+            ` total=${usage.total_tokens}`
         )
       }
 
@@ -328,27 +315,18 @@ export async function runTurn(
           argsKey: call.function.arguments,
         })
 
-        const guard = detectRepeatedCall(
-          recentCalls,
-          REPEAT_THRESHOLD
-        )
+        const guard = detectRepeatedCall(recentCalls, REPEAT_THRESHOLD)
 
         if (guard) {
           loopHits++
-          log(
-            `  ⚠ ${call.function.name} 触发循环守卫` +
-            `(${loopHits}/${MAX_LOOP_HITS})`
-          )
+          log(`  ⚠ ${call.function.name} 触发循环守卫` + `(${loopHits}/${MAX_LOOP_HITS})`)
 
           await record(item, 'not_executed', guard)
 
           if (loopHits >= MAX_LOOP_HITS) {
-            await skipRemaining(
-              '[本轮因循环守卫中止，未执行]。等待用户新指令。'
-            )
+            await skipRemaining('[本轮因循环守卫中止，未执行]。等待用户新指令。')
 
-            const reason =
-              `循环守卫已触发 ${MAX_LOOP_HITS} 次仍不收敛，本轮放弃。`
+            const reason = `循环守卫已触发 ${MAX_LOOP_HITS} 次仍不收敛，本轮放弃。`
 
             log(`\n[中止] ${reason}`)
             return await finish('failed', reason)
@@ -357,10 +335,7 @@ export async function runTurn(
           continue
         }
 
-        const prepared = options.registry.prepareCall(
-          call.function.name,
-          call.function.arguments
-        )
+        const prepared = options.registry.prepareCall(call.function.name, call.function.arguments)
 
         if (!prepared.ok) {
           await record(item, 'not_executed', prepared.error)
@@ -382,7 +357,11 @@ export async function runTurn(
           control.emit({ type: 'approval', action: item.action, state: 'waiting' })
           const allowed = await approve(tool, args, { signal, ...(action ? { action } : {}) })
           control.check()
-          control.emit({ type: 'approval', action: item.action, state: allowed ? 'allowed' : 'denied' })
+          control.emit({
+            type: 'approval',
+            action: item.action,
+            state: allowed ? 'allowed' : 'denied',
+          })
           if (!allowed) {
             await record(item, 'not_executed', REJECTED)
             continue
@@ -402,29 +381,30 @@ export async function runTurn(
         // started 已可靠保存；此后的中断必须按 uncertain 收尾。
         active = item
         control.check()
-        control.emit({ type: 'tool', scope: 'main', taskId: null, action: item.action, tool: safeToolName(tool.name), state: 'started' })
+        control.emit({
+          type: 'tool',
+          scope: 'main',
+          taskId: null,
+          action: item.action,
+          tool: safeToolName(tool.name),
+          state: 'started',
+        })
         const context = { signal, control }
         const observation = await (action ? action.execute(context) : tool.execute(args, context))
 
         await record(item, 'returned', observation)
         control.check()
 
-        log(
-          `  → ${tool.name} ⇒ ` +
-          (truncateToolResult(observation).split('\n')[0] ?? '')
-        )
+        log(`  → ${tool.name} ⇒ ` + (truncateToolResult(observation).split('\n')[0] ?? ''))
 
         if (tool.endsTurn) {
-          await skipRemaining(
-            '本轮已结束，此工具调用未执行。等待用户新指令。'
-          )
+          await skipRemaining('本轮已结束，此工具调用未执行。等待用户新指令。')
           return await finish(tool.endsTurn, observation)
         }
       }
     }
 
-    const reason =
-      `连续 ${options.maxIterations} 轮仍未得出结论，本轮放弃。`
+    const reason = `连续 ${options.maxIterations} 轮仍未得出结论，本轮放弃。`
 
     log(`\n[中止] ${reason}`)
     return await finish('budget_exhausted', reason)
@@ -450,20 +430,15 @@ export async function runTurn(
         active,
         'uncertain',
         '工具调用已经开始，但未取得正常返回；' +
-        '结果不确定，请先核查外部状态，不要直接重试。\n' + detail
+          '结果不确定，请先核查外部状态，不要直接重试。\n' +
+          detail
       )
     }
 
-    await skipRemaining(
-      '本轮已中止，此工具调用未执行。等待用户新指令。'
-    )
+    await skipRemaining('本轮已中止，此工具调用未执行。等待用户新指令。')
 
     return await finish(
-      cancelled
-        ? 'cancelled'
-        : error instanceof ContextBudgetError
-          ? 'budget_exhausted'
-          : 'failed',
+      cancelled ? 'cancelled' : error instanceof ContextBudgetError ? 'budget_exhausted' : 'failed',
       reason
     )
   } finally {

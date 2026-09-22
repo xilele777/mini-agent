@@ -6,17 +6,8 @@ import { help, parseArgs, UsageError, version } from './cli.js'
 import { runDoctor } from './doctor.js'
 import { ConfigError, loadConfig } from './config.js'
 import { createRuntime } from './runtime.js'
-import {
-  createSession,
-  openSession,
-  listSessions,
-  type SessionHandle,
-} from './session.js'
-import {
-  describeSession,
-  recoverSession,
-  runSessionTurn,
-} from './session-runner.js'
+import { createSession, openSession, listSessions, type SessionHandle } from './session.js'
+import { describeSession, recoverSession, runSessionTurn } from './session-runner.js'
 import { createTodoTools } from './tools/todo.js'
 import { clearApprovals } from './approval.js'
 
@@ -29,17 +20,28 @@ async function main() {
 
   try {
     const command = parseArgs(process.argv.slice(2))
-    if (command.kind === 'help') { console.log(help); return }
-    if (command.kind === 'version') { console.log(version); return }
-    if (command.kind === 'doctor') { await runDoctor(command.online, controller.signal); return }
+    if (command.kind === 'help') {
+      console.log(help)
+      return
+    }
+    if (command.kind === 'version') {
+      console.log(version)
+      return
+    }
+    if (command.kind === 'doctor') {
+      await runDoctor(command.online, controller.signal)
+      return
+    }
 
     if (command.kind === 'sessions') {
       const rows = await listSessions(process.cwd())
       if (!rows.length) console.log('当前项目没有会话。')
       for (const row of rows) {
-        console.log(row.ok
-          ? `${row.id}  消息 ${row.messageCount} / 待办 ${row.todoCount}`
-          : `${row.id}  无法打开：${row.error}`)
+        console.log(
+          row.ok
+            ? `${row.id}  消息 ${row.messageCount} / 待办 ${row.todoCount}`
+            : `${row.id}  无法打开：${row.error}`
+        )
       }
       return
     }
@@ -47,18 +49,15 @@ async function main() {
     // 先校验配置；配置错误不创建会话文件。
     const config = loadConfig(process.env, process.platform)
 
-    session = command.kind === 'resume'
-      ? await openSession(process.cwd(), command.id)
-      : await createSession(process.cwd())
+    session =
+      command.kind === 'resume'
+        ? await openSession(process.cwd(), command.id)
+        : await createSession(process.cwd())
 
     clearApprovals()
     await recoverSession(session)
 
-    const runtime = createRuntime(
-      config,
-      undefined,
-      createTodoTools(session)
-    )
+    const runtime = createRuntime(config, undefined, createTodoTools(session))
 
     if (existsSync(join(process.cwd(), '.mini-agent-todo.json'))) {
       console.log('发现旧项目 todo 文件；已保留，不自动导入新会话。')
@@ -74,11 +73,10 @@ async function main() {
       if (!input) continue
       if (input === 'exit' || input === 'quit') break
 
-      const result = await runSessionTurn(
-        session,
-        input,
-        { ...runtime.turnOptions, signal: controller.signal }
-      )
+      const result = await runSessionTurn(session, input, {
+        ...runtime.turnOptions,
+        signal: controller.signal,
+      })
 
       console.log(`[本轮 ${result.status}] ${result.reason}`)
 
@@ -96,10 +94,7 @@ async function main() {
     }
     if (
       error instanceof Error &&
-      (
-        error.name === 'AbortError' ||
-        ('code' in error && error.code === 'ABORT_ERR')
-      )
+      (error.name === 'AbortError' || ('code' in error && error.code === 'ABORT_ERR'))
     ) {
       console.log('已取消。')
       process.exitCode = 130

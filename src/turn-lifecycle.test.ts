@@ -8,18 +8,10 @@ import type { ChatCompletionChunk } from 'openai/resources/chat/completions'
 import type { HistoryMessage } from './context.js'
 import type { Tool } from './tools/types.js'
 import { createToolRegistry } from './tools/registry.js'
-import {
-  CheckpointError,
-  runTurn,
-  type RunTurnOptions,
-  type TurnEvent,
-} from './turn.js'
+import { CheckpointError, runTurn, type RunTurnOptions, type TurnEvent } from './turn.js'
 import { testConfig } from './test-runtime.js'
 
-function tool(
-  name: string,
-  execute: Tool['execute'] = () => 'ok'
-): Tool {
+function tool(name: string, execute: Tool['execute'] = () => 'ok'): Tool {
   return {
     name,
     description: name,
@@ -37,39 +29,43 @@ const pause = {
   endsTurn: 'paused' as const,
 }
 
-async function* response(
-  ...names: string[]
-): AsyncGenerator<ChatCompletionChunk> {
+async function* response(...names: string[]): AsyncGenerator<ChatCompletionChunk> {
   yield {
     id: 'test',
     object: 'chat.completion.chunk',
     created: 0,
     model: 'test',
-    choices: [{
-      index: 0,
-      delta: names.length ? {
-        role: 'assistant',
-        tool_calls: names.map((name, index) => ({
-          index,
-          id: `c${index}`,
-          type: 'function' as const,
-          function: { name, arguments: '{}' },
-        })),
-      } : {
-        role: 'assistant',
-        content: '继续处理',
+    choices: [
+      {
+        index: 0,
+        delta: names.length
+          ? {
+              role: 'assistant',
+              tool_calls: names.map((name, index) => ({
+                index,
+                id: `c${index}`,
+                type: 'function' as const,
+                function: { name, arguments: '{}' },
+              })),
+            }
+          : {
+              role: 'assistant',
+              content: '继续处理',
+            },
+        finish_reason: names.length ? 'tool_calls' : 'stop',
       },
-      finish_reason: names.length ? 'tool_calls' : 'stop',
-    }],
+    ],
   }
 }
 
 function setup(tools: Tool[], batches: string[][]) {
-  const messages: HistoryMessage[] = [{
-    role: 'user',
-    content: '测试任务',
-    startsTurn: true,
-  }]
+  const messages: HistoryMessage[] = [
+    {
+      role: 'user',
+      content: '测试任务',
+      startsTurn: true,
+    },
+  ]
   const events: TurnEvent[] = []
   let requests = 0
 
@@ -103,12 +99,15 @@ test('完成与暂停返回不同结果，同批后续工具不执行', async ()
     ['pause', 'paused'],
   ] as const) {
     let executed = 0
-    const s = setup([
-      tool('late', () => {
-        executed++
-        return 'late'
-      }),
-    ], [[name, 'late']])
+    const s = setup(
+      [
+        tool('late', () => {
+          executed++
+          return 'late'
+        }),
+      ],
+      [[name, 'late']]
+    )
 
     const result = await runTurn(s.messages, s.options)
 
@@ -125,26 +124,23 @@ test('完成与暂停返回不同结果，同批后续工具不执行', async ()
 test('首次保存或执行前保存失败，工具都不能开始', async () => {
   for (const phase of ['initial', 'started']) {
     let executed = 0
-    const s = setup([
-      tool('write', () => {
-        executed++
-        return 'ok'
-      }),
-    ], [['write']])
+    const s = setup(
+      [
+        tool('write', () => {
+          executed++
+          return 'ok'
+        }),
+      ],
+      [['write']]
+    )
 
     s.options.checkpoint = async (event) => {
-      if (
-        phase === 'initial' ||
-        (event.type === 'action' && event.state === 'started')
-      ) {
+      if (phase === 'initial' || (event.type === 'action' && event.state === 'started')) {
         throw new Error('模拟保存失败')
       }
     }
 
-    await assert.rejects(
-      runTurn(s.messages, s.options),
-      CheckpointError
-    )
+    await assert.rejects(runTurn(s.messages, s.options), CheckpointError)
     assert.equal(executed, 0)
     assert.equal(s.requests(), phase === 'initial' ? 0 : 1)
   }
@@ -152,12 +148,15 @@ test('首次保存或执行前保存失败，工具都不能开始', async () =>
 
 test('工具返回后的保存失败，不执行后续工具、不追加收尾检查点', async () => {
   let executed = 0
-  const s = setup([
-    tool('write', () => {
-      executed++
-      return 'ok'
-    }),
-  ], [['write', 'write']])
+  const s = setup(
+    [
+      tool('write', () => {
+        executed++
+        return 'ok'
+      }),
+    ],
+    [['write', 'write']]
+  )
 
   const states: string[] = []
 
@@ -173,48 +172,40 @@ test('工具返回后的保存失败，不执行后续工具、不追加收尾�
     }
   }
 
-  await assert.rejects(
-    runTurn(s.messages, s.options),
-    CheckpointError
-  )
+  await assert.rejects(runTurn(s.messages, s.options), CheckpointError)
   assert.equal(executed, 1)
   assert.deepEqual(states, ['started', 'returned'])
   assert.equal(s.requests(), 1)
 })
 
 test('文件已改变后工具抛错，记录不确定且保留副作用', async () => {
-  const directory = await mkdtemp(
-    join(tmpdir(), 'mini-agent-action-')
-  )
+  const directory = await mkdtemp(join(tmpdir(), 'mini-agent-action-'))
   const file = join(directory, 'marker.txt')
 
   try {
     let late = 0
-    const s = setup([
-      tool('partial', async () => {
-        await writeFile(file, '已经写入')
-        throw new Error('写入之后失败')
-      }),
-      tool('late', () => {
-        late++
-        return 'late'
-      }),
-    ], [['partial', 'late']])
-
-    assert.equal(
-      (await runTurn(s.messages, s.options)).status,
-      'failed'
+    const s = setup(
+      [
+        tool('partial', async () => {
+          await writeFile(file, '已经写入')
+          throw new Error('写入之后失败')
+        }),
+        tool('late', () => {
+          late++
+          return 'late'
+        }),
+      ],
+      [['partial', 'late']]
     )
+
+    assert.equal((await runTurn(s.messages, s.options)).status, 'failed')
     assert.equal(await readFile(file, 'utf8'), '已经写入')
     assert.equal(late, 0)
     assert.deepEqual(
       s.events.filter((e) => e.type === 'action').map((e) => e.state),
       ['started', 'uncertain', 'not_executed']
     )
-    assert.equal(
-      s.messages.filter((m) => m.role === 'tool').length,
-      2
-    )
+    assert.equal(s.messages.filter((m) => m.role === 'tool').length, 2)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -222,39 +213,33 @@ test('文件已改变后工具抛错，记录不确定且保留副作用', async
 
 test('批准拒绝、参数无效和未知工具均标记未执行', async () => {
   let executed = 0
-  const s = setup([
-    {
-      ...tool('protected', () => {
-        executed++
-        return 'bad'
-      }),
-      needsApproval: true,
-    },
-    {
-      ...tool('invalid', () => {
-        executed++
-        return 'bad'
-      }),
-      schema: z.object({ required: z.string() }),
-    },
-  ], [['protected', 'invalid', 'missing', 'pause']])
+  const s = setup(
+    [
+      {
+        ...tool('protected', () => {
+          executed++
+          return 'bad'
+        }),
+        needsApproval: true,
+      },
+      {
+        ...tool('invalid', () => {
+          executed++
+          return 'bad'
+        }),
+        schema: z.object({ required: z.string() }),
+      },
+    ],
+    [['protected', 'invalid', 'missing', 'pause']]
+  )
 
   s.options.approve = async () => false
 
-  assert.equal(
-    (await runTurn(s.messages, s.options)).status,
-    'paused'
-  )
+  assert.equal((await runTurn(s.messages, s.options)).status, 'paused')
   assert.equal(executed, 0)
   assert.deepEqual(
     s.events.filter((e) => e.type === 'action').map((e) => e.state),
-    [
-      'not_executed',
-      'not_executed',
-      'not_executed',
-      'started',
-      'returned',
-    ]
+    ['not_executed', 'not_executed', 'not_executed', 'started', 'returned']
   )
 })
 
@@ -266,88 +251,66 @@ test('批准中取消为未执行，执行中取消为不确定', async () => {
   }
 
   for (const phase of ['approval', 'execution']) {
-    const s = setup([{
-      ...tool('work', abort),
-      needsApproval: phase === 'approval',
-    }], [['work']])
+    const s = setup(
+      [
+        {
+          ...tool('work', abort),
+          needsApproval: phase === 'approval',
+        },
+      ],
+      [['work']]
+    )
 
     s.options.approve = async () => abort()
 
-    assert.equal(
-      (await runTurn(s.messages, s.options)).status,
-      'cancelled'
-    )
+    assert.equal((await runTurn(s.messages, s.options)).status, 'cancelled')
 
-    const states = s.events
-      .filter((e) => e.type === 'action')
-      .map((e) => e.state)
+    const states = s.events.filter((e) => e.type === 'action').map((e) => e.state)
 
-    assert.deepEqual(
-      states,
-      phase === 'approval'
-        ? ['not_executed']
-        : ['started', 'uncertain']
-    )
+    assert.deepEqual(states, phase === 'approval' ? ['not_executed'] : ['started', 'uncertain'])
   }
 })
 
 test('后续模型请求失败保留此前已返回结果，不重跑工具', async () => {
   let count = 0
-  const s = setup([
-    tool('work', () => {
-      count++
-      return '已完成的观察'
-    }),
-  ], [['work']])
-
-  assert.equal(
-    (await runTurn(s.messages, s.options)).status,
-    'failed'
+  const s = setup(
+    [
+      tool('work', () => {
+        count++
+        return '已完成的观察'
+      }),
+    ],
+    [['work']]
   )
+
+  assert.equal((await runTurn(s.messages, s.options)).status, 'failed')
   assert.equal(count, 1)
-  assert.ok(s.messages.some(
-    (m) => m.role === 'tool' && m.content === '已完成的观察'
-  ))
+  assert.ok(s.messages.some((m) => m.role === 'tool' && m.content === '已完成的观察'))
   assert.equal(s.requests(), 2)
 })
 
 test('原始历史保留完整工具文本，模型请求使用截断视图', async () => {
   const content = 'x'.repeat(9000)
-  const s = setup(
-    [tool('large', () => content)],
-    [['large'], ['done']]
-  )
+  const s = setup([tool('large', () => content)], [['large'], ['done']])
 
   const createStream = s.options.createStream
   s.options.createStream = async (request) => {
-    const observation = request.messages.find(
-      (m) => m.role === 'tool'
-    )
+    const observation = request.messages.find((m) => m.role === 'tool')
 
     if (observation) {
-      assert.ok(
-        String(observation.content).length < content.length
-      )
+      assert.ok(String(observation.content).length < content.length)
       assert.match(String(observation.content), /截断/)
     }
 
     return createStream(request)
   }
 
-  assert.equal(
-    (await runTurn(s.messages, s.options)).status,
-    'completed'
-  )
-  assert.ok(s.messages.some(
-    (m) => m.role === 'tool' && m.content === content
-  ))
+  assert.equal((await runTurn(s.messages, s.options)).status, 'completed')
+  assert.ok(s.messages.some((m) => m.role === 'tool' && m.content === content))
 })
 
 test('检查点收到副本，重复调用 ID 通过消息位置区分', async () => {
-  const s = setup(
-    [tool('work')],
-    [['work'], ['work'], ['done']]
-  )
+  const s = setup([tool('work')], [['work'], ['work'], ['done']])
   const positions: number[] = []
 
   s.options.checkpoint = async (event, history) => {
@@ -359,10 +322,7 @@ test('检查点收到副本，重复调用 ID 通过消息位置区分', async (
     }
   }
 
-  assert.equal(
-    (await runTurn(s.messages, s.options)).status,
-    'completed'
-  )
+  assert.equal((await runTurn(s.messages, s.options)).status, 'completed')
   assert.deepEqual(positions, [1, 3, 5])
   assert.equal(s.messages.length, 7)
 })
@@ -371,19 +331,10 @@ test('请求耗尽与循环守卫返回不同结果', async () => {
   const text = setup([], [[], []])
   text.options.maxIterations = 2
 
-  assert.equal(
-    (await runTurn(text.messages, text.options)).status,
-    'budget_exhausted'
-  )
+  assert.equal((await runTurn(text.messages, text.options)).status, 'budget_exhausted')
 
-  const loop = setup(
-    [tool('work')],
-    [['work'], ['work'], ['work'], ['work']]
-  )
+  const loop = setup([tool('work')], [['work'], ['work'], ['work'], ['work']])
 
-  assert.equal(
-    (await runTurn(loop.messages, loop.options)).status,
-    'failed'
-  )
+  assert.equal((await runTurn(loop.messages, loop.options)).status, 'failed')
   assert.equal(loop.requests(), 4)
 })

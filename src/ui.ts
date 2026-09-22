@@ -11,7 +11,10 @@ let rl: Interface | null = null
 let interrupt: (() => void) | undefined
 
 export class InputClosedError extends Error {
-  constructor() { super('输入流已关闭'); this.name = 'InputClosedError' }
+  constructor() {
+    super('输入流已关闭')
+    this.name = 'InputClosedError'
+  }
 }
 
 export function setInterruptHandler(handler: (() => void) | undefined): void {

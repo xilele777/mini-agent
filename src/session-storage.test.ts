@@ -61,9 +61,12 @@ test('无效新状态不能覆盖旧快照', async () => {
     await writeSnapshot(file, schema, before)
     const raw = await readFile(file, 'utf8')
     // 模拟来自外部数据的运行时类型错误。
-    await assert.rejects(writeSnapshot(file, schema, {
-      version: 2 as unknown as 1, title: '错误版本',
-    }))
+    await assert.rejects(
+      writeSnapshot(file, schema, {
+        version: 2 as unknown as 1,
+        title: '错误版本',
+      })
+    )
     assert.equal(await readFile(file, 'utf8'), raw)
   })
 })
@@ -72,16 +75,16 @@ test('替换前失败保留旧快照并清理临时文件', async () => {
   await fixture(async (directory, file) => {
     await writeSnapshot(file, schema, before)
     const raw = await readFile(file, 'utf8')
-    await assert.rejects(writeSnapshot(file, schema, after, async (source) => {
-      assert.deepEqual(JSON.parse(await readFile(source, 'utf8')), after)
-      assert.equal(await readFile(file, 'utf8'), raw)
-      throw new Error('模拟替换失败')
-    }), /模拟替换失败/)
-    assert.equal(await readFile(file, 'utf8'), raw)
-    assert.deepEqual(
-      (await readdir(directory)).sort(),
-      ['session.lock', 'snapshot.json']
+    await assert.rejects(
+      writeSnapshot(file, schema, after, async (source) => {
+        assert.deepEqual(JSON.parse(await readFile(source, 'utf8')), after)
+        assert.equal(await readFile(file, 'utf8'), raw)
+        throw new Error('模拟替换失败')
+      }),
+      /模拟替换失败/
     )
+    assert.equal(await readFile(file, 'utf8'), raw)
+    assert.deepEqual((await readdir(directory)).sort(), ['session.lock', 'snapshot.json'])
   })
 })
 

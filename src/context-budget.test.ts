@@ -14,7 +14,9 @@ function budget(inputLimit: number) {
 
 const system: HistoryMessage = { role: 'system', content: '系统规则' }
 const current: HistoryMessage = {
-  role: 'user', content: '当前任务', startsTurn: true,
+  role: 'user',
+  content: '当前任务',
+  startsTurn: true,
 }
 
 test('边界刚好容纳，预留生效且 startsTurn 不外发', () => {
@@ -36,14 +38,16 @@ test('旧轮整体移除，当前工具配对和内部提示保留', () => {
     {
       role: 'assistant',
       content: null,
-      tool_calls: [{
-        id: 'call-1',
-        type: 'function',
-        function: {
-          name: 'calculate',
-          arguments: '{"expression":"1+1"}',
+      tool_calls: [
+        {
+          id: 'call-1',
+          type: 'function',
+          function: {
+            name: 'calculate',
+            arguments: '{"expression":"1+1"}',
+          },
         },
-      }],
+      ],
     },
     { role: 'tool', tool_call_id: 'call-1', content: '2' },
     { role: 'user', content: '请继续' },
@@ -59,11 +63,7 @@ test('旧轮整体移除，当前工具配对和内部提示保留', () => {
   ]
 
   const expected = toModelMessages([system, ...active])
-  const plan = buildContext(
-    history,
-    [],
-    budget(estimateInputTokens(expected, []))
-  )
+  const plan = buildContext(history, [], budget(estimateInputTokens(expected, [])))
 
   if (!plan.ok) throw new Error(plan.reason)
 
@@ -87,14 +87,16 @@ test('单轮过长返回失败，不丢掉当前目标', () => {
 
 test('工具 schema 计入预算', () => {
   const history = [system, current]
-  const tools: ChatCompletionFunctionTool[] = [{
-    type: 'function',
-    function: {
-      name: 'large_tool',
-      description: 'x'.repeat(1000),
-      parameters: { type: 'object', properties: {} },
+  const tools: ChatCompletionFunctionTool[] = [
+    {
+      type: 'function',
+      function: {
+        name: 'large_tool',
+        description: 'x'.repeat(1000),
+        parameters: { type: 'object', properties: {} },
+      },
     },
-  }]
+  ]
 
   const limit = estimateInputTokens(toModelMessages(history), [])
 
@@ -109,11 +111,13 @@ test('只截断模型视图中的工具输出，原始历史保持完整', () =>
     {
       role: 'assistant',
       content: null,
-      tool_calls: [{
-        id: 'read-1',
-        type: 'function',
-        function: { name: 'read_file', arguments: '{}' },
-      }],
+      tool_calls: [
+        {
+          id: 'read-1',
+          type: 'function',
+          function: { name: 'read_file', arguments: '{}' },
+        },
+      ],
     },
     {
       role: 'tool',
@@ -154,31 +158,42 @@ test('没有真实轮标记时保留全部消息，超限就失败', () => {
 
 test('非法配置和错误轮标记明确报错', () => {
   for (const value of [NaN, Infinity, 0, -1, 0.5]) {
-    assert.throws(() => buildContext([], [], {
-      contextWindow: value,
-      outputReserve: 10,
-      safetyMargin: 1,
-    }))
+    assert.throws(() =>
+      buildContext([], [], {
+        contextWindow: value,
+        outputReserve: 10,
+        safetyMargin: 1,
+      })
+    )
   }
 
-  assert.throws(() => buildContext([], [], {
-    contextWindow: 100,
-    outputReserve: 90,
-    safetyMargin: 10,
-  }))
-
-  assert.throws(() => buildContext([
-    { role: 'assistant', content: '错误', startsTurn: true },
-  ], [], budget(1000)))
+  assert.throws(() =>
+    buildContext([], [], {
+      contextWindow: 100,
+      outputReserve: 90,
+      safetyMargin: 10,
+    })
+  )
 
   assert.throws(() =>
-    buildContext([current, system], [], budget(1000))
+    buildContext([{ role: 'assistant', content: '错误', startsTurn: true }], [], budget(1000))
   )
+
+  assert.throws(() => buildContext([current, system], [], budget(1000)))
 })
 
 test('多模态消息不能按文本估算放行', () => {
-  assert.throws(() => estimateInputTokens([{
-    role: 'user',
-    content: [{ type: 'text', text: '内容块' }],
-  }], []), /只支持文本/)
+  assert.throws(
+    () =>
+      estimateInputTokens(
+        [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: '内容块' }],
+          },
+        ],
+        []
+      ),
+    /只支持文本/
+  )
 })

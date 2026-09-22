@@ -1,7 +1,9 @@
 import { Buffer } from 'node:buffer'
 import { buildContext, estimateInputTokens, type ContextBudget } from './context-budget.js'
 import {
-  historyFingerprint, summarySchema, summaryView,
+  historyFingerprint,
+  summarySchema,
+  summaryView,
   type ContextSummary,
 } from './context-summary.js'
 import { toModelMessages, type HistoryMessage } from './context.js'
@@ -22,7 +24,8 @@ const SUMMARY_PROMPT = [
 
 const UNCERTAIN_REMINDER: HistoryMessage = {
   role: 'system',
-  content: '历史中有结果不确定的工具动作。继续相关任务前先只读核查外部状态；' +
+  content:
+    '历史中有结果不确定的工具动作。继续相关任务前先只读核查外部状态；' +
     '无法核查时保留不确定性，不得直接重试旧动作。',
 }
 
@@ -37,11 +40,8 @@ export function createSessionContext(
   return async (history, tools, requests) => {
     const state = session.snapshot
     const previous = state.summary
-    const unknown = state.turns.some((t) =>
-      t.actions.some((a) => a.state === 'uncertain'))
-    const policy = (view: HistoryMessage[]) => unknown
-      ? [UNCERTAIN_REMINDER, ...view]
-      : view
+    const unknown = state.turns.some((t) => t.actions.some((a) => a.state === 'uncertain'))
+    const policy = (view: HistoryMessage[]) => (unknown ? [UNCERTAIN_REMINDER, ...view] : view)
     const view = summaryView(history, previous)
     const plan = buildContext(policy(view), tools, budget)
 
@@ -55,15 +55,13 @@ export function createSessionContext(
     if (attempted || requests.remaining < 2) return fallback
     attempted = true
 
-    const starts = history.flatMap((m, i) => m.startsTurn ? [i] : [])
+    const starts = history.flatMap((m, i) => (m.startsTurn ? [i] : []))
     const first = starts[0]
     const current = starts.at(-1)
     if (first === undefined || current === undefined) return fallback
     const from = previous?.through ?? first
     const uncovered = starts.filter((i) => i >= from)
-    const target = plan.ok
-      ? (uncovered[plan.droppedTurns] ?? current)
-      : current
+    const target = plan.ok ? (uncovered[plan.droppedTurns] ?? current) : current
     const outputReserve = Math.min(1024, budget.outputReserve)
     let source: HistoryMessage[] | undefined
     let through = from
@@ -72,12 +70,15 @@ export function createSessionContext(
     for (const end of uncovered.filter((i) => i > from && i <= target)) {
       const candidate: HistoryMessage[] = [
         { role: 'system', content: SUMMARY_PROMPT },
-        { role: 'user', content: JSON.stringify({
-          previousSummary: previous?.content ?? null,
-          range: { from, through: end },
-          messages: history.slice(from, end),
-          turns: state.turns.filter((t) => t.start >= from && t.start < end),
-        }) },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            previousSummary: previous?.content ?? null,
+            range: { from, through: end },
+            messages: history.slice(from, end),
+            turns: state.turns.filter((t) => t.start >= from && t.start < end),
+          }),
+        },
       ]
       const sourcePlan = buildContext(candidate, [], { ...budget, outputReserve })
       if (!sourcePlan.ok) break
@@ -93,17 +94,23 @@ export function createSessionContext(
       log(`  [ctx] 摘要原始消息 [${from}, ${through})，预留一次正常请求`)
       const stream = await requests.createStream({
         scope: 'summary',
-        messages: toModelMessages(source), tools: [], maxOutputTokens: outputReserve,
+        messages: toModelMessages(source),
+        tools: [],
+        maxOutputTokens: outputReserve,
       })
       const { message, usage } = await collectResponse(stream, () => {})
-      log(usage
-        ? `  [summary] prompt=${usage.prompt_tokens} completion=${usage.completion_tokens}`
-        : '  [summary] usage 未提供')
+      log(
+        usage
+          ? `  [summary] prompt=${usage.prompt_tokens} completion=${usage.completion_tokens}`
+          : '  [summary] usage 未提供'
+      )
       if (message.refusal || message.tool_calls?.length) {
         throw new Error('摘要返回了拒绝或工具调用')
       }
       const next: ContextSummary = summarySchema.parse({
-        through, sourceHash: historyFingerprint(history, through), content: message.content,
+        through,
+        sourceHash: historyFingerprint(history, through),
+        content: message.content,
       })
       const nextView = summaryView(history, next)
       const nextPlan = buildContext(policy(nextView), tools, budget)
@@ -125,13 +132,17 @@ export function createSessionContext(
         }
         draft.summary = next
       })
-      log(`  [ctx] 摘要已保存，覆盖到消息 ${through}，${Buffer.byteLength(next.content, 'utf8')} 字节`)
+      log(
+        `  [ctx] 摘要已保存，覆盖到消息 ${through}，${Buffer.byteLength(next.content, 'utf8')} 字节`
+      )
       return nextPlan
     } catch (error) {
       if (error instanceof RunBudgetError) throw error
-      if (error instanceof Error && (
-        error.name === 'AbortError' || ('code' in error && error.code === 'ABORT_ERR')
-      )) throw error
+      if (
+        error instanceof Error &&
+        (error.name === 'AbortError' || ('code' in error && error.code === 'ABORT_ERR'))
+      )
+        throw error
       log('  [ctx] 摘要生成、校验或保存失败；保留旧状态并沿用裁剪视图')
       return fallback
     }

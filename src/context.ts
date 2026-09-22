@@ -6,9 +6,7 @@ export type HistoryMessage = ChatCompletionMessageParam & {
 }
 
 /** 创建移除本地标记的请求消息，保留原数组及其轮边界。 */
-export function toModelMessages(
-  messages: HistoryMessage[]
-): ChatCompletionMessageParam[] {
+export function toModelMessages(messages: HistoryMessage[]): ChatCompletionMessageParam[] {
   return messages.map(({ startsTurn, ...message }) => message)
 }
 
@@ -40,9 +38,7 @@ export function truncateToolResult(text: string): string {
  * 一轮包含用户请求、模型回复、工具结果及内部提示，裁剪不拆开工具调用与结果。
  * 调用方应在上一轮结束后调用；函数不会修复已有的不完整消息，也不修改原数组。
  */
-export function trimHistory(
-  messages: HistoryMessage[]
-): HistoryMessage[] {
+export function trimHistory(messages: HistoryMessage[]): HistoryMessage[] {
   const system = messages.filter((m) => m.role === 'system')
   const rest = messages.filter((m) => m.role !== 'system')
 
@@ -73,10 +69,7 @@ export interface ToolCallLog {
  * 返回 null 表示未触发，否则返回供模型调整行为的说明。
  * 未做 JSON 规范化：只改变键顺序或空白的同义参数也会被视为不同请求。
  */
-export function detectRepeatedCall(
-  recentCalls: ToolCallLog[],
-  threshold: number
-): string | null {
+export function detectRepeatedCall(recentCalls: ToolCallLog[], threshold: number): string | null {
   if (recentCalls.length < threshold) return null
 
   // 只比较末尾连续请求，其他位置的重复不在本次检测范围内。
@@ -84,9 +77,7 @@ export function detectRepeatedCall(
   const first = slice[0]
   if (!first) return null
 
-  const allSame = slice.every(
-    (c) => c.name === first.name && c.argsKey === first.argsKey
-  )
+  const allSame = slice.every((c) => c.name === first.name && c.argsKey === first.argsKey)
   if (!allSame) return null
 
   return (

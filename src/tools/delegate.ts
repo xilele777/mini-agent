@@ -9,19 +9,12 @@ const delegateParams = z.object({
     .trim()
     .min(1, '子任务不能为空')
     .max(4000, '子任务不能超过 4000 个字符')
-    .describe(
-      '要交给只读子 Agent 独立调查的明确子任务'
-    ),
+    .describe('要交给只读子 Agent 独立调查的明确子任务'),
 })
 
-export type DelegateRunner = (
-  task: string, context?: ExecutionContext
-) => Promise<string>
+export type DelegateRunner = (task: string, context?: ExecutionContext) => Promise<string>
 
-
-export function createDelegateTaskTool(
-  run: DelegateRunner
-): Tool<z.infer<typeof delegateParams>> {
+export function createDelegateTaskTool(run: DelegateRunner): Tool<z.infer<typeof delegateParams>> {
   return {
     name: 'delegate_task',
     description:

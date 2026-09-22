@@ -10,29 +10,43 @@ export function clip(text: string, label: string): string {
 
 async function killTree(pid: number): Promise<string> {
   if (process.platform !== 'win32') {
-    try { process.kill(-pid, 'SIGKILL') } catch (error) {
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
     }
     return '已向 POSIX 进程组发送 SIGKILL；脱离进程组的后代无法确认'
   }
   return new Promise((resolve, reject) => {
     const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-      windowsHide: true, stdio: 'ignore', timeout: 3000,
+      windowsHide: true,
+      stdio: 'ignore',
+      timeout: 3000,
     })
     killer.once('error', reject)
-    killer.once('close', code => resolve(code === 0
-      ? 'taskkill /T /F 成功返回；脱离父子关系的后代无法确认'
-      : `taskkill 返回 ${code}，无法确认进程树已清理`))
+    killer.once('close', (code) =>
+      resolve(
+        code === 0
+          ? 'taskkill /T /F 成功返回；脱离父子关系的后代无法确认'
+          : `taskkill 返回 ${code}，无法确认进程树已清理`
+      )
+    )
   })
 }
 
 export async function runCommand(options: {
-  command: string; shell: string; cwd: string; timeoutMs: number; signal?: AbortSignal
+  command: string
+  shell: string
+  cwd: string
+  timeoutMs: number
+  signal?: AbortSignal
 }): Promise<string> {
   options.signal?.throwIfAborted()
   return new Promise((resolve, reject) => {
     const child = spawn(options.shell, ['-c', options.command], {
-      cwd: options.cwd, windowsHide: true, detached: process.platform !== 'win32',
+      cwd: options.cwd,
+      windowsHide: true,
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const buffers: { stdout: Buffer[]; stderr: Buffer[] } = { stdout: [], stderr: [] }
@@ -48,10 +62,12 @@ export async function runCommand(options: {
     function stop(why: string) {
       if (reason || settled) return
       reason = why
-      cleanup = child.pid ? killTree(child.pid).catch(error => {
-        child.kill('SIGKILL')
-        return `进程树清理失败 (${String(error)})，仅尝试终止直接子进程`
-      }) : Promise.resolve('进程尚未启动')
+      cleanup = child.pid
+        ? killTree(child.pid).catch((error) => {
+            child.kill('SIGKILL')
+            return `进程树清理失败 (${String(error)})，仅尝试终止直接子进程`
+          })
+        : Promise.resolve('进程尚未启动')
       fallback = setTimeout(() => {
         child.kill('SIGKILL')
         child.stdout.destroy()
@@ -68,12 +84,22 @@ export async function runCommand(options: {
       options.signal?.removeEventListener('abort', abort)
       const clean = cleanup ? await cleanup : ''
       settled = true
-      const output = (['stdout', 'stderr'] as const).map(name => clip(Buffer.concat(buffers[name]).toString('utf8'), name)).filter(Boolean).join('\n\n')
+      const output = (['stdout', 'stderr'] as const)
+        .map((name) => clip(Buffer.concat(buffers[name]).toString('utf8'), name))
+        .filter(Boolean)
+        .join('\n\n')
       if (reason || signal || spawnError) {
-        const error = new Error([
-          reason ?? (spawnError ? `命令启动失败: ${spawnError.message}` : `命令被信号中断: ${signal}`),
-          clean ? `清理状态: ${clean}` : '', '可能已有部分副作用；请核查外部状态，不要直接重试。', output,
-        ].filter(Boolean).join('\n'))
+        const error = new Error(
+          [
+            reason ??
+              (spawnError ? `命令启动失败: ${spawnError.message}` : `命令被信号中断: ${signal}`),
+            clean ? `清理状态: ${clean}` : '',
+            '可能已有部分副作用；请核查外部状态，不要直接重试。',
+            output,
+          ]
+            .filter(Boolean)
+            .join('\n')
+        )
         error.name = options.signal?.aborted ? 'AbortError' : 'CommandInterruptedError'
         reject(error)
       } else {
@@ -89,8 +115,12 @@ export async function runCommand(options: {
         if (sizes[name] > MAX_BUFFER) stop(`${name} 超过 1 MiB 缓冲上限`)
       })
     }
-    child.once('error', error => { void finish(null, null, error) })
-    child.once('close', (code, signal) => { void finish(code, signal) })
+    child.once('error', (error) => {
+      void finish(null, null, error)
+    })
+    child.once('close', (code, signal) => {
+      void finish(code, signal)
+    })
     options.signal?.addEventListener('abort', abort, { once: true })
     if (options.signal?.aborted) abort()
   })

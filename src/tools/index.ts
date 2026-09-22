@@ -4,11 +4,7 @@ import { timeTool } from './time.js'
 import { writeFileTool } from './fs.js'
 import { editFileTool } from './edit.js'
 import { grepTool } from './grep.js'
-import {
-  finishTaskTool,
-  askUserTool,
-  pauseTaskTool,
-} from './control.js'
+import { finishTaskTool, askUserTool, pauseTaskTool } from './control.js'
 import { createToolRegistry } from './registry.js'
 
 export function createMainRegistry(tools: {

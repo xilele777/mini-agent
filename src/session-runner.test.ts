@@ -8,11 +8,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { z } from 'zod'
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions'
-import {
-  createSession,
-  openSession,
-  type SessionHandle,
-} from './session.js'
+import { createSession, openSession, type SessionHandle } from './session.js'
 import { recoverSession, runSessionTurn } from './session-runner.js'
 import { createTodoTools } from './tools/todo.js'
 import { createToolRegistry } from './tools/registry.js'
@@ -20,32 +16,30 @@ import type { Tool } from './tools/types.js'
 import { CheckpointError, type RunTurnOptions } from './turn.js'
 import { testConfig } from './test-runtime.js'
 
-async function* response(
-  names: string[]
-): AsyncGenerator<ChatCompletionChunk> {
+async function* response(names: string[]): AsyncGenerator<ChatCompletionChunk> {
   yield {
     id: 't',
     created: 0,
     model: 'test',
     object: 'chat.completion.chunk',
-    choices: [{
-      index: 0,
-      finish_reason: 'tool_calls',
-      delta: {
-        role: 'assistant',
-        tool_calls: names.map((name, index) => ({
-          index,
-          id: `call-${index}`,
-          type: 'function',
-          function: {
-            name,
-            arguments: name === 'add_todo'
-              ? '{"title":"独立任务"}'
-              : '{}',
-          },
-        })),
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'tool_calls',
+        delta: {
+          role: 'assistant',
+          tool_calls: names.map((name, index) => ({
+            index,
+            id: `call-${index}`,
+            type: 'function',
+            function: {
+              name,
+              arguments: name === 'add_todo' ? '{"title":"独立任务"}' : '{}',
+            },
+          })),
+        },
       },
-    }],
+    ],
   }
 }
 
@@ -57,10 +51,7 @@ const done: Tool = {
   endsTurn: 'completed',
 }
 
-function options(
-  tools: Tool[],
-  batches: string[][]
-): RunTurnOptions {
+function options(tools: Tool[], batches: string[][]): RunTurnOptions {
   let index = 0
 
   return {
@@ -91,15 +82,24 @@ if (process.argv[2] === '--crash') {
   const root = process.argv[3]!
   const session = await openSession(root, process.argv[4]!)
 
-  await runSessionTurn(session, '中断测试', options([{
-    name: 'crash',
-    description: 'crash',
-    schema: z.object({}),
-    execute: async () => {
-      await writeFile(join(root, 'marker.txt'), '执行一次')
-      process.exit(17) // 模拟执行后、结果保存前进程直接退出。
-    },
-  }], [['crash', 'finish_task']]))
+  await runSessionTurn(
+    session,
+    '中断测试',
+    options(
+      [
+        {
+          name: 'crash',
+          description: 'crash',
+          schema: z.object({}),
+          execute: async () => {
+            await writeFile(join(root, 'marker.txt'), '执行一次')
+            process.exit(17) // 模拟执行后、结果保存前进程直接退出。
+          },
+        },
+      ],
+      [['crash', 'finish_task']]
+    )
+  )
 } else {
   test('CLI 可以离线列出会话，恢复后等待输入而不请求模型', async () => {
     await fixture(async (root) => {
@@ -117,36 +117,33 @@ if (process.argv[2] === '--crash') {
         MINI_AGENT_SHELL: process.execPath,
       }
 
-      const listed = spawnSync(process.execPath, [
-        '--import',
-        import.meta.resolve('tsx'),
-        entry,
-        '--sessions',
-      ], {
-        cwd: root,
-        env: { ...env, OPENAI_MODEL: '' },
-        encoding: 'utf8',
-        windowsHide: true,
-        timeout: 10000,
-      })
+      const listed = spawnSync(
+        process.execPath,
+        ['--import', import.meta.resolve('tsx'), entry, '--sessions'],
+        {
+          cwd: root,
+          env: { ...env, OPENAI_MODEL: '' },
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 10000,
+        }
+      )
 
       assert.equal(listed.status, 0, listed.stderr)
       assert.ok(listed.stdout.includes(id))
 
-      const resumed = spawnSync(process.execPath, [
-        '--import',
-        import.meta.resolve('tsx'),
-        entry,
-        '--resume',
-        id,
-      ], {
-        cwd: root,
-        env,
-        input: 'exit\n',
-        encoding: 'utf8',
-        windowsHide: true,
-        timeout: 10000,
-      })
+      const resumed = spawnSync(
+        process.execPath,
+        ['--import', import.meta.resolve('tsx'), entry, '--resume', id],
+        {
+          cwd: root,
+          env,
+          input: 'exit\n',
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 10000,
+        }
+      )
 
       assert.equal(resumed.status, 0, resumed.stderr)
       assert.match(resumed.stdout, /等待你的新指令/)
@@ -166,10 +163,7 @@ if (process.argv[2] === '--crash') {
         const result = await runSessionTurn(
           session,
           '记录任务',
-          options(createTodoTools(session), [
-            ['add_todo'],
-            ['finish_task'],
-          ])
+          options(createTodoTools(session), [['add_todo'], ['finish_task']])
         )
 
         assert.equal(result.status, 'completed')
@@ -187,10 +181,7 @@ if (process.argv[2] === '--crash') {
           reopened.snapshot.turns[0]?.actions.map((a) => a.state),
           ['returned', 'returned']
         )
-        assert.equal(
-          reopened.snapshot.todo.tasks[0]?.title,
-          '独立任务'
-        )
+        assert.equal(reopened.snapshot.todo.tasks[0]?.title, '独立任务')
 
         const raw = JSON.stringify(reopened.snapshot)
         await recoverSession(reopened)
@@ -211,36 +202,41 @@ if (process.argv[2] === '--crash') {
           return real.snapshot
         },
         close: () => real.close(),
-        update: (change) => real.update(async (draft) => {
-          await change(draft)
-          if (draft.turns.at(-1)?.actions.some(
-            (a) => a.state === 'started'
-          )) {
-            throw new Error('故障')
-          }
-        }),
+        update: (change) =>
+          real.update(async (draft) => {
+            await change(draft)
+            if (draft.turns.at(-1)?.actions.some((a) => a.state === 'started')) {
+              throw new Error('故障')
+            }
+          }),
       }
 
       try {
         await assert.rejects(
-          runSessionTurn(proxy, '执行', options([{
-            name: 'work',
-            description: '',
-            schema: z.object({}),
-            execute: () => {
-              count++
-              return 'ok'
-            },
-          }], [['work']])),
+          runSessionTurn(
+            proxy,
+            '执行',
+            options(
+              [
+                {
+                  name: 'work',
+                  description: '',
+                  schema: z.object({}),
+                  execute: () => {
+                    count++
+                    return 'ok'
+                  },
+                },
+              ],
+              [['work']]
+            )
+          ),
           CheckpointError
         )
 
         assert.equal(count, 0)
         await recoverSession(real)
-        assert.equal(
-          real.snapshot.turns.at(-1)?.actions[0]?.state,
-          'not_executed'
-        )
+        assert.equal(real.snapshot.turns.at(-1)?.actions[0]?.state, 'not_executed')
       } finally {
         await real.close()
       }
@@ -257,27 +253,35 @@ if (process.argv[2] === '--crash') {
           return real.snapshot
         },
         close: () => real.close(),
-        update: (change) => real.update(async (draft) => {
-          await change(draft)
-          if (draft.turns.at(-1)?.actions.some(
-            (a) => a.state === 'returned'
-          )) {
-            throw new Error('故障')
-          }
-        }),
+        update: (change) =>
+          real.update(async (draft) => {
+            await change(draft)
+            if (draft.turns.at(-1)?.actions.some((a) => a.state === 'returned')) {
+              throw new Error('故障')
+            }
+          }),
       }
 
       try {
         await assert.rejects(
-          runSessionTurn(proxy, '执行', options([{
-            name: 'work',
-            description: '',
-            schema: z.object({}),
-            execute: () => {
-              count++
-              return '已改变'
-            },
-          }], [['work', 'finish_task']])),
+          runSessionTurn(
+            proxy,
+            '执行',
+            options(
+              [
+                {
+                  name: 'work',
+                  description: '',
+                  schema: z.object({}),
+                  execute: () => {
+                    count++
+                    return '已改变'
+                  },
+                },
+              ],
+              [['work', 'finish_task']]
+            )
+          ),
           CheckpointError
         )
 
@@ -306,33 +310,39 @@ if (process.argv[2] === '--crash') {
       const session = await createSession(root)
 
       try {
-        await assert.rejects(session.update((s) => {
-          s.messages.push({
-            role: 'tool',
-            tool_call_id: 'orphan',
-            content: '伪造结果',
+        await assert.rejects(
+          session.update((s) => {
+            s.messages.push({
+              role: 'tool',
+              tool_call_id: 'orphan',
+              content: '伪造结果',
+            })
           })
-        }))
+        )
 
-        await assert.rejects(session.update((s) => {
-          s.messages.push({
-            role: 'user',
-            content: 'task',
-            startsTurn: true,
+        await assert.rejects(
+          session.update((s) => {
+            s.messages.push({
+              role: 'user',
+              content: 'task',
+              startsTurn: true,
+            })
+            s.turns.push({
+              id: randomUUID(),
+              start: 0,
+              status: 'completed',
+              reason: '',
+              actions: [
+                {
+                  messageIndex: 1,
+                  callId: 'missing',
+                  state: 'started',
+                  observation: null,
+                },
+              ],
+            })
           })
-          s.turns.push({
-            id: randomUUID(),
-            start: 0,
-            status: 'completed',
-            reason: '',
-            actions: [{
-              messageIndex: 1,
-              callId: 'missing',
-              state: 'started',
-              observation: null,
-            }],
-          })
-        }))
+        )
 
         assert.equal(session.snapshot.messages.length, 0)
       } finally {
@@ -352,9 +362,7 @@ if (process.argv[2] === '--crash') {
           const create = o.createStream
 
           o.createStream = async (request) => {
-            counts.push(
-              request.messages.filter((m) => m.role === 'user').length
-            )
+            counts.push(request.messages.filter((m) => m.role === 'user').length)
             return create(request)
           }
 
@@ -362,10 +370,7 @@ if (process.argv[2] === '--crash') {
         }
 
         assert.equal(session.snapshot.turns.length, 9)
-        assert.equal(
-          session.snapshot.messages.filter((m) => m.role === 'user').length,
-          9
-        )
+        assert.equal(session.snapshot.messages.filter((m) => m.role === 'user').length, 9)
         assert.equal(counts.at(-1), 9)
       } finally {
         await session.close()
@@ -379,24 +384,18 @@ if (process.argv[2] === '--crash') {
       const id = initial.snapshot.id
       await initial.close()
 
-      const child = spawnSync(process.execPath, [
-        '--import',
-        'tsx',
-        fileURLToPath(import.meta.url),
-        '--crash',
-        root,
-        id,
-      ], {
-        encoding: 'utf8',
-        timeout: 15000,
-        windowsHide: true,
-      })
+      const child = spawnSync(
+        process.execPath,
+        ['--import', 'tsx', fileURLToPath(import.meta.url), '--crash', root, id],
+        {
+          encoding: 'utf8',
+          timeout: 15000,
+          windowsHide: true,
+        }
+      )
 
       assert.equal(child.status, 17, child.stderr)
-      assert.equal(
-        await readFile(join(root, 'marker.txt'), 'utf8'),
-        '执行一次'
-      )
+      assert.equal(await readFile(join(root, 'marker.txt'), 'utf8'), '执行一次')
 
       await assert.rejects(openSession(root, id), /占用/)
 
@@ -412,16 +411,9 @@ if (process.argv[2] === '--crash') {
           reopened.snapshot.turns.at(-1)?.actions.map((a) => a.state),
           ['uncertain', 'not_executed']
         )
-        assert.equal(
-          await readFile(join(root, 'marker.txt'), 'utf8'),
-          '执行一次'
-        )
+        assert.equal(await readFile(join(root, 'marker.txt'), 'utf8'), '执行一次')
 
-        const result = await runSessionTurn(
-          reopened,
-          '只结束新轮',
-          options([], [['finish_task']])
-        )
+        const result = await runSessionTurn(reopened, '只结束新轮', options([], [['finish_task']]))
 
         assert.equal(result.status, 'completed')
       } finally {

@@ -11,7 +11,8 @@ const entry = fileURLToPath(new URL('./agent.ts', import.meta.url))
 const loader = import.meta.resolve('tsx')
 const env = { ...process.env }
 for (const key of Object.keys(env)) {
-  if (key.startsWith('OPENAI_') || key.startsWith('MINI_AGENT_') || key.startsWith('DOTENV_')) delete env[key]
+  if (key.startsWith('OPENAI_') || key.startsWith('MINI_AGENT_') || key.startsWith('DOTENV_'))
+    delete env[key]
 }
 env.DOTENV_CONFIG_PATH = join(tmpdir(), 'mini-agent-no-env-file')
 
@@ -21,7 +22,12 @@ async function project(t: TestContext) {
   t.after(async () => {
     const resolved = await realpath(dir)
     const rel = relative(base, resolved)
-    assert.ok(rel.startsWith('mini-agent-cli-') && !isAbsolute(rel) && !rel.includes('/') && !rel.includes('\\'))
+    assert.ok(
+      rel.startsWith('mini-agent-cli-') &&
+        !isAbsolute(rel) &&
+        !rel.includes('/') &&
+        !rel.includes('\\')
+    )
     await rm(resolved, { recursive: true, force: true })
   })
   return dir
@@ -30,16 +36,25 @@ async function project(t: TestContext) {
 async function cli(cwd: string, args: string[], configured = false, input?: string) {
   return await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', loader, entry, ...args], {
-      cwd, windowsHide: true,
-      env: configured ? {
-        ...env, OPENAI_API_KEY: 'cli-test-secret', OPENAI_BASE_URL: 'http://127.0.0.1:1/v1',
-        OPENAI_MODEL: 'offline-test', MINI_AGENT_SHELL: process.execPath,
-      } : env,
+      cwd,
+      windowsHide: true,
+      env: configured
+        ? {
+            ...env,
+            OPENAI_API_KEY: 'cli-test-secret',
+            OPENAI_BASE_URL: 'http://127.0.0.1:1/v1',
+            OPENAI_MODEL: 'offline-test',
+            MINI_AGENT_SHELL: process.execPath,
+          }
+        : env,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     let output = ''
     let sent = false
-    const timer = setTimeout(() => { child.kill(); reject(new Error('CLI timed out')) }, 15_000)
+    const timer = setTimeout(() => {
+      child.kill()
+      reject(new Error('CLI timed out'))
+    }, 15_000)
     const collect = (chunk: Buffer) => {
       output += chunk.toString()
       if (input !== undefined && !sent && output.includes('你>')) {
@@ -50,13 +65,25 @@ async function cli(cwd: string, args: string[], configured = false, input?: stri
     child.stdout.on('data', collect)
     child.stderr.on('data', collect)
     if (input === undefined) child.stdin.end()
-    child.on('error', (error) => { clearTimeout(timer); reject(error) })
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code, output }) })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolve({ code, output })
+    })
   })
 }
 
 test('CLI 严格拒绝组合、缺参、额外参数和无效 UUID', () => {
-  for (const args of [['--resume'], ['--resume', '../bad'], ['--online'], ['--help', '--sessions'], ['--doctor', '--online', 'x']]) {
+  for (const args of [
+    ['--resume'],
+    ['--resume', '../bad'],
+    ['--online'],
+    ['--help', '--sessions'],
+    ['--doctor', '--online', 'x'],
+  ]) {
     assert.throws(() => parseArgs(args), UsageError)
   }
   assert.deepEqual(parseArgs(['--doctor', '--online']), { kind: 'doctor', online: true })
@@ -107,7 +134,9 @@ test('关闭 REPL 输入流释放会话锁，随后可以恢复', async (t) => {
   const resumed = await cli(cwd, ['--resume', id], true, 'exit\n')
   assert.equal(resumed.code, 0, resumed.output)
   assert.match(resumed.output, /恢复不会自动执行旧调用/)
-  const snapshot = JSON.parse(await readFile(join(cwd, '.mini-agent', 'sessions', id, 'snapshot.json'), 'utf8'))
+  const snapshot = JSON.parse(
+    await readFile(join(cwd, '.mini-agent', 'sessions', id, 'snapshot.json'), 'utf8')
+  )
   assert.equal(snapshot.turns.length, 0)
 })
 

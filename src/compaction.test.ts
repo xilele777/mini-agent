@@ -17,8 +17,11 @@ import type { CreateTurnStream, RunTurnOptions, TurnRequest } from './turn.js'
 const budget = { contextWindow: 6000, outputReserve: 512, safetyMargin: 128 }
 const marker = '摘要：用户只允许读取；旧写入被拒绝，未执行。'
 const done: Tool = {
-  name: 'done', description: 'd'.repeat(2300), schema: z.object({}),
-  endsTurn: 'completed', execute: () => '完成',
+  name: 'done',
+  description: 'd'.repeat(2300),
+  schema: z.object({}),
+  endsTurn: 'completed',
+  execute: () => '完成',
 }
 
 async function* textStream(
@@ -26,21 +29,49 @@ async function* textStream(
   finish: 'stop' | 'length' = 'stop',
   refusal: string | null = null
 ): AsyncGenerator<ChatCompletionChunk> {
-  yield { id: 's', object: 'chat.completion.chunk', created: 0, model: 'test',
-    choices: [{ index: 0, delta: { content, refusal }, finish_reason: finish }] }
+  yield {
+    id: 's',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'test',
+    choices: [{ index: 0, delta: { content, refusal }, finish_reason: finish }],
+  }
 }
 
 async function* doneStream(): AsyncGenerator<ChatCompletionChunk> {
-  yield { id: 'd', object: 'chat.completion.chunk', created: 0, model: 'test',
-    choices: [{ index: 0, finish_reason: 'tool_calls', delta: {
-      tool_calls: [{ index: 0, id: 'done-call', type: 'function',
-        function: { name: 'done', arguments: '{}' } }],
-    } }] }
+  yield {
+    id: 'd',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'test',
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'tool_calls',
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              id: 'done-call',
+              type: 'function',
+              function: { name: 'done', arguments: '{}' },
+            },
+          ],
+        },
+      },
+    ],
+  }
 }
 
 function options(createStream: CreateTurnStream, maxIterations = 3): RunTurnOptions {
-  return { createStream, maxIterations, contextBudget: budget,
-    registry: createToolRegistry([done]), write: () => {}, log: () => {} }
+  return {
+    createStream,
+    maxIterations,
+    contextBudget: budget,
+    registry: createToolRegistry([done]),
+    write: () => {},
+    log: () => {},
+  }
 }
 
 async function fixture(run: (session: SessionHandle, root: string, file: string) => Promise<void>) {
@@ -50,14 +81,24 @@ async function fixture(run: (session: SessionHandle, root: string, file: string)
     await session.update((s) => {
       s.messages.push({ role: 'system', content: '遵守当前用户约束。' })
       for (let i = 0; i < 3; i++) {
-        s.turns.push({ id: randomUUID(), start: s.messages.length,
-          status: 'completed', reason: '已记录', actions: [] })
-        s.messages.push({ role: 'user', startsTurn: true,
-          content: `OLD-${i}:` + 'x'.repeat(900) },
-        { role: 'assistant', content: '已记录' })
+        s.turns.push({
+          id: randomUUID(),
+          start: s.messages.length,
+          status: 'completed',
+          reason: '已记录',
+          actions: [],
+        })
+        s.messages.push(
+          { role: 'user', startsTurn: true, content: `OLD-${i}:` + 'x'.repeat(900) },
+          { role: 'assistant', content: '已记录' }
+        )
       }
     })
-    await run(session, root, join(root, '.mini-agent', 'sessions', session.snapshot.id, 'snapshot.json'))
+    await run(
+      session,
+      root,
+      join(root, '.mini-agent', 'sessions', session.snapshot.id, 'snapshot.json')
+    )
   } finally {
     await session.close()
     await rm(root, { recursive: true, force: true })
@@ -65,8 +106,12 @@ async function fixture(run: (session: SessionHandle, root: string, file: string)
 }
 
 function assertFits(request: TurnRequest) {
-  assert.ok(estimateInputTokens(request.messages, request.tools) +
-    request.maxOutputTokens + budget.safetyMargin <= budget.contextWindow)
+  assert.ok(
+    estimateInputTokens(request.messages, request.tools) +
+      request.maxOutputTokens +
+      budget.safetyMargin <=
+      budget.contextWindow
+  )
 }
 
 test('摘要先持久化再发送，恢复不重复拼入已覆盖原文，也不自动请求模型', async () => {
@@ -74,21 +119,29 @@ test('摘要先持久化再发送，恢复不重复拼入已覆盖原文，也�
     const original = session.snapshot.messages
     let summaries = 0
     let main = 0
-    const result = await runSessionTurn(session, '继续，只读', options(async (request) => {
-      assertFits(request)
-      if (!request.tools.length) {
-        summaries++
-        assert.equal(session.snapshot.summary, null)
-        assert.ok(JSON.stringify(request.messages).includes('OLD-0:'))
-        return textStream()
-      }
-      main++
-      assert.equal(session.snapshot.summary?.content, marker)
-      assert.ok(!JSON.stringify(request.messages).includes('OLD-0:'))
-      assert.ok(request.messages.some((m) => m.role === 'user' && String(m.content).includes(marker)))
-      assert.ok(!request.messages.some((m) => m.role === 'system' && String(m.content).includes(marker)))
-      return doneStream()
-    }, 2))
+    const result = await runSessionTurn(
+      session,
+      '继续，只读',
+      options(async (request) => {
+        assertFits(request)
+        if (!request.tools.length) {
+          summaries++
+          assert.equal(session.snapshot.summary, null)
+          assert.ok(JSON.stringify(request.messages).includes('OLD-0:'))
+          return textStream()
+        }
+        main++
+        assert.equal(session.snapshot.summary?.content, marker)
+        assert.ok(!JSON.stringify(request.messages).includes('OLD-0:'))
+        assert.ok(
+          request.messages.some((m) => m.role === 'user' && String(m.content).includes(marker))
+        )
+        assert.ok(
+          !request.messages.some((m) => m.role === 'system' && String(m.content).includes(marker))
+        )
+        return doneStream()
+      }, 2)
+    )
     assert.equal(result.status, 'completed')
     assert.equal(summaries, 1)
     assert.equal(main, 1)
@@ -101,39 +154,57 @@ test('摘要先持久化再发送，恢复不重复拼入已覆盖原文，也�
       assert.deepEqual(reopened.snapshot.summary, summary)
       assert.match(describeSession(reopened), /历史摘要覆盖/)
       assert.equal(summaries, 1)
-      const next = await runSessionTurn(reopened, '接着做', options(async (request) => {
-        assert.ok(request.tools.length > 0, '恢复后无需重做同一摘要')
-        assert.ok(!JSON.stringify(request.messages).includes('OLD-0:'))
-        return doneStream()
-      }))
+      const next = await runSessionTurn(
+        reopened,
+        '接着做',
+        options(async (request) => {
+          assert.ok(request.tools.length > 0, '恢复后无需重做同一摘要')
+          assert.ok(!JSON.stringify(request.messages).includes('OLD-0:'))
+          return doneStream()
+        })
+      )
       assert.equal(next.status, 'completed')
-    } finally { await reopened.close() }
+    } finally {
+      await reopened.close()
+    }
   })
 })
 
 test('增量摘要合并之前摘要且覆盖范围只向前推进', async () => {
   await fixture(async (session) => {
-    await runSessionTurn(session, '继续', options(async (r) =>
-      r.tools.length ? doneStream() : textStream()))
+    await runSessionTurn(
+      session,
+      '继续',
+      options(async (r) => (r.tools.length ? doneStream() : textStream()))
+    )
     const before = session.snapshot.summary!
     let summaries = 0
-    await runSessionTurn(session, '新目标' + 'y'.repeat(2000), options(async (r) => {
-      assertFits(r)
-      if (r.tools.length) return doneStream()
-      summaries++
-      const data = JSON.parse(String(r.messages[1]?.content))
-      assert.equal(data.previousSummary, before.content)
-      assert.equal(data.range.from, before.through)
-      assert.ok(!JSON.stringify(data.messages).includes('OLD-0:'))
-      return textStream('合并摘要：旧约束保持，只读，尚未写入。')
-    }))
+    await runSessionTurn(
+      session,
+      '新目标' + 'y'.repeat(2000),
+      options(async (r) => {
+        assertFits(r)
+        if (r.tools.length) return doneStream()
+        summaries++
+        const data = JSON.parse(String(r.messages[1]?.content))
+        assert.equal(data.previousSummary, before.content)
+        assert.equal(data.range.from, before.through)
+        assert.ok(!JSON.stringify(data.messages).includes('OLD-0:'))
+        return textStream('合并摘要：旧约束保持，只读，尚未写入。')
+      })
+    )
     assert.equal(summaries, 1)
     assert.ok(session.snapshot.summary!.through > before.through)
   })
 })
 
 for (const [name, response] of [
-  ['网络失败', async () => { throw new Error('transport') }],
+  [
+    '网络失败',
+    async () => {
+      throw new Error('transport')
+    },
+  ],
   ['空正文', async () => textStream('')],
   ['拒绝', async () => textStream('', 'stop', '不总结')],
   ['截断', async () => textStream('部分摘要', 'length')],
@@ -145,14 +216,21 @@ for (const [name, response] of [
     await fixture(async (session) => {
       let summaries = 0
       let main = 0
-      const result = await runSessionTurn(session, '继续', options(async (r) => {
-        assertFits(r)
-        if (!r.tools.length) { summaries++; return response() }
-        main++
-        assert.equal(session.snapshot.summary, null)
-        assert.ok(!JSON.stringify(r.messages).includes('[历史摘要'))
-        return main === 1 ? textStream('继续处理') : doneStream()
-      }, 3))
+      const result = await runSessionTurn(
+        session,
+        '继续',
+        options(async (r) => {
+          assertFits(r)
+          if (!r.tools.length) {
+            summaries++
+            return response()
+          }
+          main++
+          assert.equal(session.snapshot.summary, null)
+          assert.ok(!JSON.stringify(r.messages).includes('[历史摘要'))
+          return main === 1 ? textStream('继续处理') : doneStream()
+        }, 3)
+      )
       assert.equal(summaries, 1)
       assert.equal(main, 2)
       assert.equal(result.status, 'completed')
@@ -165,19 +243,30 @@ test('摘要保存失败不发布候选，后续正常动作仍可保存', async
   await fixture(async (session, _root, file) => {
     let failedSaves = 0
     const proxy: SessionHandle = {
-      get snapshot() { return session.snapshot }, close: () => session.close(),
-      update: (change) => session.update(async (draft) => {
-        await change(draft)
-        if (draft.summary !== null) { failedSaves++; throw new Error('保存故障') }
-      }),
+      get snapshot() {
+        return session.snapshot
+      },
+      close: () => session.close(),
+      update: (change) =>
+        session.update(async (draft) => {
+          await change(draft)
+          if (draft.summary !== null) {
+            failedSaves++
+            throw new Error('保存故障')
+          }
+        }),
     }
-    const result = await runSessionTurn(proxy, '继续', options(async (r) => {
-      if (!r.tools.length) return textStream()
-      assert.equal(session.snapshot.summary, null)
-      assert.equal(JSON.parse(await readFile(file, 'utf8')).summary, null)
-      assert.ok(!JSON.stringify(r.messages).includes(marker))
-      return doneStream()
-    }))
+    const result = await runSessionTurn(
+      proxy,
+      '继续',
+      options(async (r) => {
+        if (!r.tools.length) return textStream()
+        assert.equal(session.snapshot.summary, null)
+        assert.equal(JSON.parse(await readFile(file, 'utf8')).summary, null)
+        assert.ok(!JSON.stringify(r.messages).includes(marker))
+        return doneStream()
+      })
+    )
     assert.equal(result.status, 'completed')
     assert.equal(failedSaves, 1)
     assert.equal(session.snapshot.summary, null)
@@ -187,10 +276,14 @@ test('摘要保存失败不发布候选，后续正常动作仍可保存', async
 test('摘要占用主轮请求额度，并给正常回答保留一次请求', async () => {
   await fixture(async (session) => {
     let calls = 0
-    const result = await runSessionTurn(session, '继续', options(async (r) => {
-      calls++
-      return r.tools.length ? textStream('还在处理') : textStream()
-    }, 2))
+    const result = await runSessionTurn(
+      session,
+      '继续',
+      options(async (r) => {
+        calls++
+        return r.tools.length ? textStream('还在处理') : textStream()
+      }, 2)
+    )
     assert.equal(calls, 2)
     assert.equal(result.status, 'budget_exhausted')
     assert.ok(session.snapshot.summary)
@@ -200,11 +293,15 @@ test('摘要占用主轮请求额度，并给正常回答保留一次请求', as
 test('只剩一次请求时不生成摘要', async () => {
   await fixture(async (session) => {
     let calls = 0
-    const result = await runSessionTurn(session, '继续', options(async (r) => {
-      calls++
-      assert.ok(r.tools.length > 0)
-      return doneStream()
-    }, 1))
+    const result = await runSessionTurn(
+      session,
+      '继续',
+      options(async (r) => {
+        calls++
+        assert.ok(r.tools.length > 0)
+        return doneStream()
+      }, 1)
+    )
     assert.equal(calls, 1)
     assert.equal(result.status, 'completed')
     assert.equal(session.snapshot.summary, null)
@@ -213,9 +310,13 @@ test('只剩一次请求时不生成摘要', async () => {
 
 test('当前轮本身超限时零请求，摘要不能删除当前目标来腾空间', async () => {
   await fixture(async (session) => {
-    const result = await runSessionTurn(session, 'x'.repeat(8000), options(async () => {
-      assert.fail('不得请求主模型或摘要')
-    }))
+    const result = await runSessionTurn(
+      session,
+      'x'.repeat(8000),
+      options(async () => {
+        assert.fail('不得请求主模型或摘要')
+      })
+    )
     assert.equal(result.status, 'budget_exhausted')
     assert.equal(session.snapshot.summary, null)
   })
@@ -223,13 +324,19 @@ test('当前轮本身超限时零请求，摘要不能删除当前目标来腾�
 
 test('旧轮大到无法放入摘要请求时不发送摘要，仍可裁剪继续', async () => {
   await fixture(async (session) => {
-    await session.update((s) => { s.messages[1]!.content = 'x'.repeat(10000) })
+    await session.update((s) => {
+      s.messages[1]!.content = 'x'.repeat(10000)
+    })
     let calls = 0
-    const result = await runSessionTurn(session, '继续', options(async (r) => {
-      calls++
-      assert.ok(r.tools.length > 0)
-      return doneStream()
-    }))
+    const result = await runSessionTurn(
+      session,
+      '继续',
+      options(async (r) => {
+        calls++
+        assert.ok(r.tools.length > 0)
+        return doneStream()
+      })
+    )
     assert.equal(result.status, 'completed')
     assert.equal(calls, 1)
     assert.equal(session.snapshot.summary, null)
@@ -239,11 +346,15 @@ test('旧轮大到无法放入摘要请求时不发送摘要，仍可裁剪继�
 test('摘要取消向外传播，不能退回普通请求继续执行', async () => {
   await fixture(async (session) => {
     let calls = 0
-    const result = await runSessionTurn(session, '继续', options(async (r) => {
-      calls++
-      assert.equal(r.tools.length, 0)
-      throw new DOMException('cancelled', 'AbortError')
-    }))
+    const result = await runSessionTurn(
+      session,
+      '继续',
+      options(async (r) => {
+        calls++
+        assert.equal(r.tools.length, 0)
+        throw new DOMException('cancelled', 'AbortError')
+      })
+    )
     assert.equal(calls, 1)
     assert.equal(result.status, 'cancelled')
     assert.equal(session.snapshot.summary, null)
@@ -253,15 +364,22 @@ test('摘要取消向外传播，不能退回普通请求继续执行', async ()
 test('旧摘要无法放入新窗口时保留磁盘摘要，仅本次回退原始历史视图', async () => {
   await fixture(async (session) => {
     await session.update((s) => {
-      s.summary = { through: 3, sourceHash: historyFingerprint(s.messages, 3),
-        content: 's'.repeat(5800) }
+      s.summary = {
+        through: 3,
+        sourceHash: historyFingerprint(s.messages, 3),
+        content: 's'.repeat(5800),
+      }
     })
     const previous = session.snapshot.summary
-    const result = await runSessionTurn(session, '继续', options(async (r) => {
-      assertFits(r)
-      assert.ok(!JSON.stringify(r.messages).includes('[历史摘要'))
-      return doneStream()
-    }, 1))
+    const result = await runSessionTurn(
+      session,
+      '继续',
+      options(async (r) => {
+        assertFits(r)
+        assert.ok(!JSON.stringify(r.messages).includes('[历史摘要'))
+        return doneStream()
+      }, 1)
+    )
     assert.equal(result.status, 'completed')
     assert.deepEqual(session.snapshot.summary, previous)
   })
@@ -271,22 +389,36 @@ test('拒绝错误覆盖边界、指纹不匹配与修改已摘要原文', async
   await fixture(async (session) => {
     const before = session.snapshot
     for (const through of [0, 2, 99]) {
-      await assert.rejects(session.update((s) => {
-        s.summary = { through, content: marker,
-          sourceHash: historyFingerprint(s.messages, through) }
-      }))
+      await assert.rejects(
+        session.update((s) => {
+          s.summary = {
+            through,
+            content: marker,
+            sourceHash: historyFingerprint(s.messages, through),
+          }
+        })
+      )
     }
-    await assert.rejects(session.update((s) => {
-      s.summary = { through: 3, content: marker, sourceHash: '0'.repeat(64) }
-    }))
+    await assert.rejects(
+      session.update((s) => {
+        s.summary = { through: 3, content: marker, sourceHash: '0'.repeat(64) }
+      })
+    )
     assert.deepEqual(session.snapshot, before)
     await session.update((s) => {
       s.summary = { through: 3, content: marker, sourceHash: historyFingerprint(s.messages, 3) }
     })
-    await assert.rejects(session.update((s) => { s.messages[1]!.content = '被修改' }))
-    assert.throws(() => summaryView(session.snapshot.messages, {
-      ...session.snapshot.summary!, through: 2,
-    }))
+    await assert.rejects(
+      session.update((s) => {
+        s.messages[1]!.content = '被修改'
+      })
+    )
+    assert.throws(() =>
+      summaryView(session.snapshot.messages, {
+        ...session.snapshot.summary!,
+        through: 2,
+      })
+    )
   })
 })
 
@@ -303,9 +435,13 @@ test('v2 只读迁移不改文件，下次保存写 v3；未知版本仍拒绝',
       assert.equal(reopened.snapshot.version, 3)
       assert.equal(reopened.snapshot.summary, null)
       assert.equal(await readFile(file, 'utf8'), legacy)
-      await reopened.update((s) => { s.todo.tasks.push({ id: s.todo.nextId++, title: '新待办' }) })
+      await reopened.update((s) => {
+        s.todo.tasks.push({ id: s.todo.nextId++, title: '新待办' })
+      })
       assert.equal(JSON.parse(await readFile(file, 'utf8')).version, 3)
-    } finally { await reopened.close() }
+    } finally {
+      await reopened.close()
+    }
     for (const version of [1, 99]) {
       const invalid = JSON.stringify({ ...old, version })
       await writeFile(file, invalid)
@@ -320,10 +456,26 @@ test('不确定动作提醒在预算检查之前加入，不能在检查后使�
     await session.update((s) => {
       const turn = s.turns.at(-1)!
       const messageIndex = s.messages.length
-      s.messages.push({ role: 'assistant', content: null, tool_calls: [{
-        id: 'unknown', type: 'function', function: { name: 'write_file', arguments: '{}' },
-      }] }, { role: 'tool', tool_call_id: 'unknown', content: '结果不确定' })
-      turn.actions.push({ messageIndex, callId: 'unknown', state: 'uncertain', observation: '结果不确定' })
+      s.messages.push(
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'unknown',
+              type: 'function',
+              function: { name: 'write_file', arguments: '{}' },
+            },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'unknown', content: '结果不确定' }
+      )
+      turn.actions.push({
+        messageIndex,
+        callId: 'unknown',
+        state: 'uncertain',
+        observation: '结果不确定',
+      })
     })
     let sent = 0
     const o = options(async (r) => {
@@ -335,13 +487,19 @@ test('不确定动作提醒在预算检查之前加入，不能在检查后使�
     assert.equal(sent, 1)
 
     // 精确只容纳原 system 与新输入，不能再偷偷添加提醒。
-    const inputLimit = estimateInputTokens([
-      { role: 'system', content: '遵守当前用户约束。' },
-      { role: 'user', content: '继续' },
-    ], o.registry.getToolSchemas())
+    const inputLimit = estimateInputTokens(
+      [
+        { role: 'system', content: '遵守当前用户约束。' },
+        { role: 'user', content: '继续' },
+      ],
+      o.registry.getToolSchemas()
+    )
     const result = await runSessionTurn(session, '继续', {
-      ...o, contextBudget: { contextWindow: inputLimit + 640, outputReserve: 512, safetyMargin: 128 },
-      createStream: async () => { assert.fail('提醒使固定前缀超限，不应发送') },
+      ...o,
+      contextBudget: { contextWindow: inputLimit + 640, outputReserve: 512, safetyMargin: 128 },
+      createStream: async () => {
+        assert.fail('提醒使固定前缀超限，不应发送')
+      },
     })
     assert.equal(result.status, 'budget_exhausted')
   })
@@ -351,24 +509,42 @@ test('摘要输入携带动作状态，生成期间原文改变时不能发布�
   await fixture(async (session) => {
     await session.update((s) => {
       // 重新构造含拒绝动作的完整旧轮。
-      s.messages.splice(2, 0,
-        { role: 'assistant', content: null, tool_calls: [{ id: 'denied', type: 'function',
-          function: { name: 'write_file', arguments: '{}' } }] },
-        { role: 'tool', tool_call_id: 'denied', content: '用户拒绝，未执行' })
-      s.turns[0]!.actions.push({ messageIndex: 2, callId: 'denied',
-        state: 'not_executed', observation: '用户拒绝，未执行' })
+      s.messages.splice(
+        2,
+        0,
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'denied', type: 'function', function: { name: 'write_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'denied', content: '用户拒绝，未执行' }
+      )
+      s.turns[0]!.actions.push({
+        messageIndex: 2,
+        callId: 'denied',
+        state: 'not_executed',
+        observation: '用户拒绝，未执行',
+      })
       for (const t of s.turns.slice(1)) t.start += 2
     })
-    const result = await runSessionTurn(session, '继续', options(async (r) => {
-      if (r.tools.length) {
-        assert.equal(session.snapshot.summary, null)
-        return doneStream()
-      }
-      const source = JSON.parse(String(r.messages[1]?.content))
-      assert.equal(source.turns[0].actions[0].state, 'not_executed')
-      await session.update((s) => { s.messages[1]!.content = '更新后的原文' })
-      return textStream()
-    }))
+    const result = await runSessionTurn(
+      session,
+      '继续',
+      options(async (r) => {
+        if (r.tools.length) {
+          assert.equal(session.snapshot.summary, null)
+          return doneStream()
+        }
+        const source = JSON.parse(String(r.messages[1]?.content))
+        assert.equal(source.turns[0].actions[0].state, 'not_executed')
+        await session.update((s) => {
+          s.messages[1]!.content = '更新后的原文'
+        })
+        return textStream()
+      })
+    )
     assert.equal(result.status, 'completed')
     assert.equal(session.snapshot.summary, null)
   })

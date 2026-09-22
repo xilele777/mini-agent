@@ -65,22 +65,15 @@ export function describeAPIError(error: unknown): string {
   return '流式协议或工具调用不兼容；检查 base URL 是否指向 API，及服务是否支持流式工具调用。'
 }
 
-export async function checkShell(
-  config: AppConfig,
-  signal?: AbortSignal
-): Promise<CheckResult> {
+export async function checkShell(config: AppConfig, signal?: AbortSignal): Promise<CheckResult> {
   try {
     // Windows 使用 Git Bash，Linux 使用 sh/bash。
-    const { stdout } = await execFileAsync(
-      config.shell,
-      ['-c', 'printf mini-agent-doctor-ok'],
-      {
-        timeout: Math.min(config.commandTimeoutMs, 5000),
-        maxBuffer: 4096,
-        windowsHide: true,
-        ...(signal ? { signal } : {}),
-      }
-    )
+    const { stdout } = await execFileAsync(config.shell, ['-c', 'printf mini-agent-doctor-ok'], {
+      timeout: Math.min(config.commandTimeoutMs, 5000),
+      maxBuffer: 4096,
+      windowsHide: true,
+      ...(signal ? { signal } : {}),
+    })
 
     if (stdout !== 'mini-agent-doctor-ok') {
       throw new Error('unexpected output')
@@ -108,35 +101,36 @@ export async function checkModel(
 
     const stream = await createStream({
       ...(signal ? { signal } : {}),
-      messages: [{
-        role: 'user',
-        content: 'Call doctor_echo with value="ok".',
-      }],
-      tools: [{
-        type: 'function',
-        function: {
-          name: 'doctor_echo',
-          description: 'Return a diagnostic marker. No action is executed.',
-          parameters: {
-            type: 'object',
-            properties: {
-              value: { type: 'string', enum: ['ok'] },
+      messages: [
+        {
+          role: 'user',
+          content: 'Call doctor_echo with value="ok".',
+        },
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'doctor_echo',
+            description: 'Return a diagnostic marker. No action is executed.',
+            parameters: {
+              type: 'object',
+              properties: {
+                value: { type: 'string', enum: ['ok'] },
+              },
+              required: ['value'],
+              additionalProperties: false,
             },
-            required: ['value'],
-            additionalProperties: false,
           },
         },
-      }],
+      ],
       tool_choice: {
         type: 'function',
         function: { name: 'doctor_echo' },
       },
     })
 
-    const { message } = await collectResponse(
-      stream,
-      () => undefined
-    )
+    const { message } = await collectResponse(stream, () => undefined)
 
     const call = message.tool_calls?.[0]
 
