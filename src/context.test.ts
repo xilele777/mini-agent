@@ -1,21 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import {
-  detectRepeatedCall,
-  truncateToolResult,
-  trimHistory,
-  toModelMessages,
-} from './context.js'
-import type { HistoryMessage, ToolCallLog } from './context.js'
+import { detectRepeatedCall, truncateToolResult, trimHistory, toModelMessages } from './context.js'
+import type { HistoryMessage } from './context.js'
 
 test('检测:少于阈值 → 无恙', () => {
-  assert.equal(
-    detectRepeatedCall(
-      [{ name: 'read_file', argsKey: '{"path":"a.ts"}' }],
-      3
-    ),
-    null
-  )
+  assert.equal(detectRepeatedCall([{ name: 'read_file', argsKey: '{"path":"a.ts"}' }], 3), null)
 })
 
 test('检测:3 条完全相同 → 触发', () => {
@@ -58,7 +47,6 @@ test('检测:中间穿插别的工具 → 无恙', () => {
     null
   )
 })
-
 
 test('检测:只看最后连续段(最早不同不影响)', () => {
   assert.ok(
@@ -115,11 +103,13 @@ test('历史裁剪：保留最近六个完整用户轮', () => {
       {
         role: 'assistant',
         content: null,
-        tool_calls: [{
-          id: 'finish-' + i,
-          type: 'function',
-          function: { name: 'finish_task', arguments: '{}' },
-        }],
+        tool_calls: [
+          {
+            id: 'finish-' + i,
+            type: 'function',
+            function: { name: 'finish_task', arguments: '{}' },
+          },
+        ],
       },
       {
         role: 'tool',
@@ -132,10 +122,7 @@ test('历史裁剪：保留最近六个完整用户轮', () => {
   const messages = [system, ...turns.flat()]
   const original = structuredClone(messages)
 
-  assert.deepEqual(
-    trimHistory(messages),
-    [system, ...turns.slice(1).flat()]
-  )
+  assert.deepEqual(trimHistory(messages), [system, ...turns.slice(1).flat()])
   assert.deepEqual(messages, original)
 })
 

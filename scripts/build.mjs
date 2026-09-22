@@ -8,13 +8,20 @@ const root = await realpath(fileURLToPath(new URL('../', import.meta.url)))
 const dist = join(root, 'dist')
 try {
   const info = await lstat(dist)
-  if (info.isSymbolicLink() || await realpath(dist) !== dist) throw new Error('拒绝清理非项目内的 dist 目录。')
+  if (info.isSymbolicLink() || (await realpath(dist)) !== dist)
+    throw new Error('拒绝清理非项目内的 dist 目录。')
   await rm(dist, { recursive: true, force: true })
 } catch (error) {
   if (error.code !== 'ENOENT') throw error
 }
-const result = spawnSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.build.json'], {
-  cwd: root, stdio: 'inherit', windowsHide: true,
-})
+const result = spawnSync(
+  process.execPath,
+  [join(root, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.build.json'],
+  {
+    cwd: root,
+    stdio: 'inherit',
+    windowsHide: true,
+  }
+)
 if (result.error) throw result.error
 process.exitCode = result.status ?? 1

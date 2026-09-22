@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { BLOCKED, ROOT, isBlocked, guardPathRead, guardDirRead } from './guard.js'
+import { ROOT, isBlocked, guardPathRead, guardDirRead } from './guard.js'
 
 // 项目外路径用系统临时目录构造；链接用例还会创建并清理实际夹具。
 
@@ -63,7 +63,11 @@ test('read 守卫: 经符号链接指到项目外 → 拒绝', async () => {
     if (!r.ok) assert.match(r.message, /符号链接|之外/)
   } catch (e) {
     // 环境不允许创建链接时结束本用例，其他错误继续抛出。
-    if ((e as NodeJS.ErrnoException).code !== 'EPERM' && (e as NodeJS.ErrnoException).code !== 'EACCES') throw e
+    if (
+      (e as NodeJS.ErrnoException).code !== 'EPERM' &&
+      (e as NodeJS.ErrnoException).code !== 'EACCES'
+    )
+      throw e
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

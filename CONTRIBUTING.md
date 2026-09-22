@@ -27,8 +27,9 @@ Windows 的 Git Bash 不在默认 `C:/Program Files/Git/bin/bash.exe` 时，先�
 
 | 命令 | 覆盖范围 |
 | --- | --- |
-| `npm run typecheck` | TypeScript 类型检查 |
-| `npm test` | 工具、流协议、会话、预算、取消和 CLI 回归 |
+| `npm run typecheck` | TypeScript 类型检查，含未使用变量与参数检查 |
+| `npm run format` / `npm run format:check` | Prettier 统一格式；提交前运行 `format`，CI 运行 `format:check` |
+| `npm test` | 工具、流协议、会话、预算、取消和 CLI 回归，自动收集 `src/**/*.test.ts` |
 | `npm run test:resilience` | 重试、故障注入、共享预算和脱敏轨迹 |
 | `npm run test:delivery` | 全新目录安装、打包及生产依赖运行 |
 | `npm run test:fixture` | 固定业务缺陷及独立判定机制 |

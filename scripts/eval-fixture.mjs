@@ -20,7 +20,12 @@ async function inventory(dir, prefix = '') {
     if (entry.isDirectory()) {
       for (const [key, value] of await inventory(target, `${name}/`)) files.set(key, value)
     } else if (entry.isFile()) {
-      files.set(name, createHash('sha256').update(await readFile(target)).digest('hex'))
+      files.set(
+        name,
+        createHash('sha256')
+          .update(await readFile(target))
+          .digest('hex')
+      )
     } else {
       throw new Error('评测副本包含不支持的文件类型。')
     }
@@ -32,7 +37,12 @@ async function insideRuns(path) {
   const base = await realpath(runs)
   const target = await realpath(resolve(path))
   const rel = relative(base, target)
-  if (!rel || rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) {
+  if (
+    !rel ||
+    rel === '..' ||
+    rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) ||
+    isAbsolute(rel)
+  ) {
     throw new Error('目标必须是 .mini-agent-eval 中的独立任务副本。')
   }
   return target
@@ -44,7 +54,9 @@ async function createCopy() {
   const target = await mkdtemp(join(runs, 'shipping-'))
   for (const name of await readdir(template)) {
     await cp(join(template, name), join(target, name), {
-      recursive: true, force: false, errorOnExist: true,
+      recursive: true,
+      force: false,
+      errorOnExist: true,
     })
   }
   return target
@@ -54,25 +66,43 @@ async function evaluate(path) {
   const target = await insideRuns(path)
   const expected = await inventory(template)
   const actual = await inventory(target)
-  const unexpected = [...new Set([...expected.keys(), ...actual.keys()])]
-    .filter((name) => name === allowed
-      ? !actual.has(name)
-      : expected.get(name) !== actual.get(name))
+  const unexpected = [...new Set([...expected.keys(), ...actual.keys()])].filter((name) =>
+    name === allowed ? !actual.has(name) : expected.get(name) !== actual.get(name)
+  )
   if (unexpected.length) {
-    return { passed: false, unexpected, status: null, output: '非目标文件被修改、添加或删除，未运行测试。' }
+    return {
+      passed: false,
+      unexpected,
+      status: null,
+      output: '非目标文件被修改、添加或删除，未运行测试。',
+    }
   }
 
-  const result = spawnSync(process.execPath, [
-    join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
-    '--test', '--test-reporter=tap', 'src/shipping.test.ts',
-  ], {
-    cwd: target, encoding: 'utf8', timeout: 10_000,
-    maxBuffer: 1024 * 1024, windowsHide: true,
-  })
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      '--test',
+      '--test-reporter=tap',
+      'src/shipping.test.ts',
+    ],
+    {
+      cwd: target,
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    }
+  )
   const output = result.stdout + result.stderr
   return {
-    passed: !result.error && result.status === 0 && /# tests 3\b/.test(output) && /# pass 3\b/.test(output),
-    unexpected, status: result.status,
+    passed:
+      !result.error &&
+      result.status === 0 &&
+      /# tests 3\b/.test(output) &&
+      /# pass 3\b/.test(output),
+    unexpected,
+    status: result.status,
     output: result.error ? `测试进程未正常完成：${result.error.code}` : output,
   }
 }

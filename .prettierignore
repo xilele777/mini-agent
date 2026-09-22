@@ -1,0 +1,9 @@
+node_modules/
+dist/
+docs/
+fixtures/
+.agents/
+board.html
+board.snapshot.html
+*.tgz
+package-lock.json
